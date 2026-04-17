@@ -1,0 +1,452 @@
+import React, { useState, useEffect, useContext } from 'react';
+import { Routes, Route } from 'react-router-dom';
+import axios from 'axios';
+import { Trash2, Edit, Plus, Check, FileText } from 'lucide-react';
+import { AuthContext } from '../context/AuthContext';
+import ReportViewer from '../components/ReportViewer';
+
+function Dashboard() {
+  return (
+    <div>
+      <h1 style={{ marginBottom: '1rem' }}>Operational Bridge</h1>
+      <div className="card">
+        <h3>Department Overview</h3>
+        <p style={{ color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>Manage department blueprints, assistants, and dispatch tasks.</p>
+      </div>
+    </div>
+  );
+}
+
+function Assistants() {
+  const [users, setUsers] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editUserId, setEditUserId] = useState(null);
+  const [userToDelete, setUserToDelete] = useState(null);
+  const { user } = useContext(AuthContext); // to get department/branch
+  const [formData, setFormData] = useState({
+    name: '', email: '', phone: '', password: ''
+  });
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const fetchUsers = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/users');
+      setUsers(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchUsers(); }, []);
+
+  const handleNameChange = (e) => {
+    const newName = e.target.value;
+    const firstName = newName.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    setFormData(prev => ({
+      ...prev, name: newName, password: editUserId ? prev.password : (firstName ? `${firstName}123` : '')
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(''); setSuccess('');
+    try {
+      if (editUserId) {
+        await axios.put(`http://localhost:5000/api/users/${editUserId}`, formData);
+        setSuccess('Assistant updated successfully.');
+      } else {
+        const res = await axios.post('http://localhost:5000/api/users', { ...formData, role: 'ASSISTANT', department: user.department, branch: user.branch });
+        setSuccess(`Assistant created successfully. Password: ${res.data.temporaryPassword}`);
+      }
+      setFormData({ name: '', email: '', phone: '', password: '' });
+      setEditUserId(null); setShowForm(false);
+      fetchUsers();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Operation failed');
+    }
+  };
+
+  const handleEdit = (u) => {
+    setFormData({ name: u.name, email: u.email, phone: u.phone, password: '' });
+    setEditUserId(u._id); setShowForm(true); setError(''); setSuccess('');
+  };
+
+  const confirmDelete = (u) => setUserToDelete(u);
+
+  const handleDelete = async () => {
+    if(!userToDelete) return;
+    try {
+      await axios.delete(`http://localhost:5000/api/users/${userToDelete._id}`);
+      setUserToDelete(null); fetchUsers();
+    } catch(err) {
+      setError(err.response?.data?.message || 'Failed to delete');
+      setUserToDelete(null);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <h1>Assistants Management</h1>
+        <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); if(showForm) setEditUserId(null); }}>
+          {showForm ? 'Close Form' : '+ Create Assistant'}
+        </button>
+      </div>
+
+      {error && <div style={{ marginBottom: '1rem', color: 'var(--color-danger)', backgroundColor: 'var(--color-danger-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{error}</div>}
+      {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+
+      {showForm && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <h3 style={{ marginBottom: '1rem' }}>{editUserId ? 'Edit Assistant' : 'Create Assistant'}</h3>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Full Name</label>
+                <input type="text" value={formData.name} onChange={handleNameChange} required placeholder="Jane Doe" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Email Address</label>
+                <input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} required placeholder="jane@foodlab.com" />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Phone Number</label>
+                <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} required />
+              </div>
+              {!editUserId && (
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Password (Auto-generated)</label>
+                  <input type="text" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required />
+                </div>
+              )}
+            </div>
+            <div>
+              <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem' }}>{editUserId ? 'Update Assistant' : 'Submit & Create'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <table>
+          <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            {users.length === 0 ? (
+              <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem' }}>No assistants found</td></tr>
+            ) : (
+             users.map(u => (
+              <tr key={u._id}>
+                <td style={{ fontWeight: 500 }}>{u.name}</td><td>{u.email}</td>
+                <td><span className="badge badge-success">{u.role}</span></td>
+                <td>
+                  {userToDelete && userToDelete._id === u._id ? (
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-danger)' }}>Sure?</span>
+                      <button onClick={handleDelete} className="btn-danger" style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: 'none', cursor: 'pointer' }}>Yes</button>
+                      <button onClick={() => setUserToDelete(null)} style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>No</button>
+                    </div>
+                  ) : (
+                    <>
+                      <button onClick={() => handleEdit(u)} style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', marginRight: '1rem' }}><Edit size={18}/></button>
+                      <button onClick={() => confirmDelete(u)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}><Trash2 size={18}/></button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            )))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Blueprints() {
+  const [blueprints, setBlueprints] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const { user } = useContext(AuthContext);
+  const defaultUnits = ["mg/L", "ppm", "pH", "%", "CFU/g", "Custom..."];
+  
+  const [parameters, setParameters] = useState([
+    { name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }
+  ]);
+
+  const fetchBlueprints = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/tests/blueprints');
+      setBlueprints(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchBlueprints(); }, []);
+
+  const addParameterRow = () => {
+    setParameters([...parameters, { name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }]);
+  };
+
+  const removeParameterRow = (index) => {
+    setParameters(parameters.filter((_, i) => i !== index));
+  };
+
+  const updateParameter = (index, field, value) => {
+    const updated = [...parameters];
+    updated[index][field] = value;
+    setParameters(updated);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      const finalParams = parameters.map(p => ({
+        name: p.name,
+        referenceRange: p.referenceRange,
+        unit: p.unitType === 'Custom...' ? p.customUnit : p.unitType
+      }));
+      await axios.post('http://localhost:5000/api/tests/blueprints', {
+        name, department: user.department || 'HQ', parameters: finalParams
+      });
+      setName(''); setParameters([{ name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }]);
+      setShowForm(false);
+      fetchBlueprints();
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.message || err.response?.data?.error || err.message || 'Operation failed');
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <h1>Test Blueprints</h1>
+        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
+          {showForm ? 'Close Form' : '+ Build Blueprint'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Build a Master Schema</h3>
+          {error && <div style={{ marginBottom: '1rem', color: 'var(--color-danger)', backgroundColor: 'var(--color-danger-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{error}</div>}
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Test / Schema Name</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Soil Chemistry Profile" />
+            </div>
+
+            <div style={{ marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--color-border)' }}>
+              <h4 style={{ color: 'var(--color-primary)' }}>Parameters</h4>
+            </div>
+
+            {parameters.map((p, i) => (
+              <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                <div style={{ flex: 2 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Parameter Name</label>
+                  <input type="text" value={p.name} onChange={e => updateParameter(i, 'name', e.target.value)} required placeholder="e.g. pH Level" />
+                </div>
+                <div style={{ flex: 1.5 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Reference Range</label>
+                  <input type="text" value={p.referenceRange} onChange={e => updateParameter(i, 'referenceRange', e.target.value)} required placeholder="e.g. 6.5 - 7.5" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Unit</label>
+                  <select value={p.unitType} onChange={e => updateParameter(i, 'unitType', e.target.value)} required>
+                    {defaultUnits.map(du => <option key={du} value={du}>{du}</option>)}
+                  </select>
+                </div>
+                {p.unitType === 'Custom...' && (
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Custom Unit</label>
+                    <input type="text" value={p.customUnit} onChange={e => updateParameter(i, 'customUnit', e.target.value)} required placeholder="g/mol" />
+                  </div>
+                )}
+                {parameters.length > 1 && (
+                  <button type="button" onClick={() => removeParameterRow(i)} style={{ alignSelf: 'flex-end', marginBottom: '0.4rem', border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}>
+                    <Trash2 size={20} />
+                  </button>
+                )}
+              </div>
+            ))}
+
+            <button type="button" onClick={addParameterRow} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'none', border: '1px dashed var(--color-primary)', color: 'var(--color-primary)', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', marginBottom: '1.5rem', width: '100%', justifyContent: 'center' }}>
+              <Plus size={16} /> Add Another Parameter
+            </button>
+
+            <button type="submit" className="btn btn-success" style={{ backgroundColor: 'var(--color-success)', color: 'white', width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}>
+              <Check size={18} /> Save Schema
+            </button>
+          </form>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {blueprints.length === 0 ? <p style={{ color: 'var(--color-text-muted)' }}>No blueprints created yet.</p> : null}
+        {blueprints.map(bp => (
+          <div key={bp._id} className="card" style={{ padding: '1rem 1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: 'var(--color-primary-dark)' }}>{bp.name}</h3>
+              <span className="badge badge-warning">{bp.parameters.length} Parameters</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
+              {bp.parameters.map(p => (
+                <div key={p._id} style={{ fontSize: '0.85rem', backgroundColor: 'var(--color-surface-hover)', border: '1px solid var(--color-border)', padding: '0.3rem 0.6rem', borderRadius: '4px' }}>
+                  <b>{p.name}</b> ({p.unit})
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Dispatcher() {
+  const [assistants, setAssistants] = useState([]);
+  const [blueprints, setBlueprints] = useState([]);
+  
+  const [formData, setFormData] = useState({
+    blueprintId: '', clientName: '', deadline: '', assignedTo: ''
+  });
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    axios.get('http://localhost:5000/api/users').then(res => setAssistants(res.data)).catch(console.error);
+    axios.get('http://localhost:5000/api/tests/blueprints').then(res => setBlueprints(res.data)).catch(console.error);
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post('http://localhost:5000/api/tests/instances', formData);
+      setSuccess('Job Dispatched successfully. It is now completely blinded for the assistant.');
+      setFormData({ blueprintId: '', clientName: '', deadline: '', assignedTo: '' });
+      setTimeout(() => setSuccess(''), 4000);
+    } catch(err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div>
+      <h1 style={{ marginBottom: '1.5rem' }}>Job Dispatcher</h1>
+      {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+      
+      <div className="card glass-panel" style={{ maxWidth: '800px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Master Schema</label>
+            <select value={formData.blueprintId} onChange={e => setFormData({...formData, blueprintId: e.target.value})} required>
+              <option value="" disabled>--- Select a Schema ---</option>
+              {blueprints.map(bp => <option key={bp._id} value={bp._id}>{bp.name} ({bp.parameters.length} params)</option>)}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Client Name <span style={{color:'var(--color-text-muted)', fontWeight:400, fontSize:'0.75rem'}}>(Will be masked)</span></label>
+              <input type="text" value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} required placeholder="John Doe Corp." />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Global Deadline</label>
+              <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({...formData, deadline: e.target.value})} required />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Assign to Lab Assistant</label>
+            <select value={formData.assignedTo} onChange={e => setFormData({...formData, assignedTo: e.target.value})} required>
+              <option value="" disabled>--- Assign Assistant ---</option>
+              {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name} ({ast.email})</option>)}
+            </select>
+          </div>
+
+          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }}>
+             Submit & Dispatch Secure Job 
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default function HeadDashboard() {
+  return (
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/assistants" element={<Assistants />} />
+      <Route path="/blueprints" element={<Blueprints />} />
+      <Route path="/dispatcher" element={<Dispatcher />} />
+      <Route path="/audit" element={<Audit />} />
+    </Routes>
+  );
+}
+
+function Audit() {
+  const [instances, setInstances] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+
+  const fetchInstances = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/tests/instances');
+      setInstances(res.data.filter(i => i.status === 'COMPLETED'));
+    } catch(err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchInstances(); }, []);
+
+  if (selectedReport) {
+    return <ReportViewer report={selectedReport} onBack={() => setSelectedReport(null)} />;
+  }
+
+  return (
+    <div>
+       <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+         <FileText size={28} style={{ color: 'var(--color-primary)' }}/> Department Audit Log
+       </h1>
+       <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+        <table>
+          <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+            <tr>
+              <th>Test Code</th>
+              <th>Client Name</th>
+              <th>Blueprint</th>
+              <th>Analyst</th>
+              <th>Date Completed</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {instances.length === 0 ? (
+              <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests in your department yet.</td></tr>
+            ) : (
+              instances.map(inst => (
+                <tr key={inst._id}>
+                  <td style={{ fontFamily: 'monospace' }}>{inst.testCode}</td>
+                  <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
+                  <td>{inst.blueprintId?.name}</td>
+                  <td>{inst.assignedTo?.name}</td>
+                  <td>{new Date(inst.completedAt).toLocaleDateString()}</td>
+                  <td>
+                    <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+       </div>
+    </div>
+  );
+}
