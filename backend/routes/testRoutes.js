@@ -8,7 +8,7 @@ const { authorize } = require('../middlewares/roleMiddleware');
 // --- BLUEPRINTS ---
 
 // Head creates a test blueprint
-router.post('/blueprints', protect, authorize('HEAD'), async (req, res) => {
+router.post('/blueprints', protect, authorize('LAB_HEAD', 'HEAD'), async (req, res) => {
   try {
     const { name, department, parameters } = req.body;
     const blueprint = await TestBlueprint.create({
@@ -24,7 +24,7 @@ router.post('/blueprints', protect, authorize('HEAD'), async (req, res) => {
 });
 
 // Get all blueprints
-router.get('/blueprints', protect, authorize('ADMIN', 'HEAD'), async (req, res) => {
+router.get('/blueprints', protect, authorize('ADMIN', 'LAB_HEAD', 'HEAD'), async (req, res) => {
   try {
     const blueprints = await TestBlueprint.find().populate('createdBy', 'name');
     res.json(blueprints);
@@ -67,11 +67,17 @@ router.get('/instances', protect, async (req, res) => {
   }
 });
 
+const Job = require('../models/Job');
+
 // Head assigns a test to an assistant
 router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
   try {
-    const { blueprintId, clientName, deadline, assignedTo } = req.body;
+    const { blueprintId, jobId, deadline, assignedTo } = req.body;
     
+    // Fetch Job to get clientName
+    const job = await Job.findById(jobId);
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+
     // Generate test code randomly
     const testCode = '#UL-' + Math.floor(1000 + Math.random() * 9000) + 'X';
 
@@ -88,14 +94,22 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
     }));
 
     const instance = await TestInstance.create({
+      jobId,
       blueprintId,
       testCode,
-      clientName,
+      clientName: job.clientName,
       deadline,
       assignedTo,
       results: initialResults,
       createdBy: req.user._id
     });
+
+    // Update job distribution status
+    const dept = req.user.department ? req.user.department.toLowerCase() : 'micro';
+    if (job.distribution && job.distribution[dept]) {
+      job.distribution[dept].status = 'ASSIGNED_TO_ASSISTANT';
+      await job.save();
+    }
 
     res.status(201).json(instance);
   } catch (err) {
@@ -117,6 +131,20 @@ router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req
     instance.completedAt = new Date();
     
     await instance.save();
+
+    // Update job distribution status
+    const Job = require('../models/Job');
+    const job = await Job.findById(instance.jobId);
+    if (job) {
+      if (job.distribution.micro.required && String(job.distribution.micro.assignedTo) === String(instance.createdBy)) {
+        job.distribution.micro.status = 'COMPLETED';
+      }
+      if (job.distribution.macro.required && String(job.distribution.macro.assignedTo) === String(instance.createdBy)) {
+        job.distribution.macro.status = 'COMPLETED';
+      }
+      await job.save();
+    }
+
     res.json(instance);
   } catch (err) {
     res.status(500).json({ message: 'Error updating results' });

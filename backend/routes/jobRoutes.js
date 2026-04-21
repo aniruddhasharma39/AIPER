@@ -1,0 +1,62 @@
+const express = require('express');
+const router = express.Router();
+const Job = require('../models/Job');
+const TestInstance = require('../models/TestInstance');
+const { protect } = require('../middlewares/authMiddleware');
+const { authorize } = require('../middlewares/roleMiddleware');
+
+// Get all jobs based on role
+router.get('/', protect, async (req, res) => {
+  try {
+    let query = {};
+    if (req.user.role === 'HEAD') {
+      // Head sees jobs assigned to their department
+      query = {
+        $or: [
+          { 'distribution.micro.assignedTo': req.user._id },
+          { 'distribution.macro.assignedTo': req.user._id }
+        ]
+      };
+    }
+    // LAB_HEAD and ADMIN see all jobs.
+    const jobs = await Job.find(query)
+      .populate('createdBy', 'name email')
+      .populate('distribution.micro.assignedTo', 'name')
+      .populate('distribution.macro.assignedTo', 'name')
+      .sort({ createdAt: -1 });
+
+    // We want to fetch the associated test instances for timeline across all roles
+    const jobsWithTimeline = await Promise.all(jobs.map(async (job) => {
+      const instances = await TestInstance.find({ jobId: job._id })
+        .populate('assignedTo', 'name')
+        .sort({ createdAt: 1 });
+      return { ...job.toObject(), testInstances: instances };
+    }));
+    return res.json(jobsWithTimeline);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching jobs' });
+  }
+});
+
+// Create a new job (LAB_HEAD only)
+router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
+  try {
+    const { clientName, totalSampleVolume, distribution } = req.body;
+    
+    const jobCode = 'JOB-' + Math.floor(1000 + Math.random() * 9000);
+
+    const job = await Job.create({
+      jobCode,
+      clientName,
+      totalSampleVolume,
+      distribution,
+      createdBy: req.user._id
+    });
+
+    res.status(201).json(job);
+  } catch (error) {
+    res.status(500).json({ message: 'Error creating job', error: error.message });
+  }
+});
+
+module.exports = router;

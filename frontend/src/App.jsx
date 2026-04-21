@@ -1,11 +1,12 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useContext } from 'react';
 import { AuthContext } from './context/AuthContext';
-import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
 import HeadDashboard from './pages/HeadDashboard';
+import LabHeadDashboard from './pages/LabHeadDashboard';
 import AssistantDashboard from './pages/AssistantDashboard';
 import Layout from './components/Layout';
+import Login from './pages/Login';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useContext(AuthContext);
@@ -30,6 +31,7 @@ function App() {
         element={
           !user ? <Navigate to="/login" replace /> :
           user.role === 'ADMIN' ? <Navigate to="/admin" replace /> :
+          user.role === 'LAB_HEAD' ? <Navigate to="/lab-head" replace /> :
           user.role === 'HEAD' ? <Navigate to="/head" replace /> :
           <Navigate to="/assistant" replace />
         } 
@@ -39,6 +41,13 @@ function App() {
       <Route path="/admin/*" element={
         <ProtectedRoute allowedRoles={['ADMIN']}>
           <AdminDashboard />
+        </ProtectedRoute>
+      } />
+
+      {/* Lab Head Routes */}
+      <Route path="/lab-head/*" element={
+        <ProtectedRoute allowedRoles={['LAB_HEAD']}>
+          <LabHeadDashboard />
         </ProtectedRoute>
       } />
 

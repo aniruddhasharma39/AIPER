@@ -34,6 +34,8 @@ export const AuthProvider = ({ children }) => {
       name: res.data.name,
       email: res.data.email,
       role: res.data.role,
+      department: res.data.department,
+      branch: res.data.branch,
       requiresPasswordChange: res.data.requiresPasswordChange
     };
     localStorage.setItem('user', JSON.stringify(userData));

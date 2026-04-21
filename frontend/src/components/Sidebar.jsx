@@ -10,9 +10,15 @@ export default function Sidebar() {
     switch(user?.role) {
       case 'ADMIN':
         return [
-          { to: '/admin', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
-          { to: '/admin/users', icon: <Users size={20} />, label: 'User Management' },
-          { to: '/admin/audit', icon: <FileText size={20} />, label: 'Master Audit Log' },
+          { to: '/admin', icon: <LayoutDashboard size={20} />, label: 'Super Admin Tracker' },
+          { to: '/admin/users', icon: <Users size={20} />, label: 'Manage Lab Head' },
+        ];
+      case 'LAB_HEAD':
+        return [
+          { to: '/lab-head', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
+          { to: '/lab-head/jobs', icon: <Activity size={20} />, label: 'Job Distributor' },
+          { to: '/lab-head/blueprints', icon: <Settings size={20} />, label: 'Test Blueprints' },
+          { to: '/lab-head/users', icon: <Users size={20} />, label: 'User Management' },
         ];
       case 'HEAD':
         return [
@@ -20,7 +26,6 @@ export default function Sidebar() {
           { to: '/head/assistants', icon: <Users size={20} />, label: 'Assistants' },
           { to: '/head/blueprints', icon: <Settings size={20} />, label: 'Test Blueprints' },
           { to: '/head/dispatcher', icon: <Activity size={20} />, label: 'Job Dispatcher' },
-          { to: '/head/audit', icon: <FileText size={20} />, label: 'Audit Log' },
         ];
       case 'ASSISTANT':
         return [

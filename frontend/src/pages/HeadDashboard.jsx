@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Trash2, Edit, Plus, Check, FileText } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 import ReportViewer from '../components/ReportViewer';
+import JobLogTable from '../components/JobLogTable';
 
 function Dashboard() {
   return (
@@ -313,24 +314,39 @@ function Blueprints() {
 function Dispatcher() {
   const [assistants, setAssistants] = useState([]);
   const [blueprints, setBlueprints] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const { user } = useContext(AuthContext);
   
   const [formData, setFormData] = useState({
-    blueprintId: '', clientName: '', deadline: '', assignedTo: ''
+    blueprintId: '', jobId: '', deadline: '', assignedTo: ''
   });
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
     axios.get('http://localhost:5000/api/users').then(res => setAssistants(res.data)).catch(console.error);
     axios.get('http://localhost:5000/api/tests/blueprints').then(res => setBlueprints(res.data)).catch(console.error);
-  }, []);
+    
+    // Fetch Jobs assigned to this head
+    axios.get('http://localhost:5000/api/jobs').then(res => {
+      const dept = user?.department ? user.department.toLowerCase() : '';
+      // filter pending
+      setJobs(res.data.filter(j => j.distribution[dept]?.status === 'PENDING'));
+    }).catch(console.error);
+  }, [user]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       await axios.post('http://localhost:5000/api/tests/instances', formData);
       setSuccess('Job Dispatched successfully. It is now completely blinded for the assistant.');
-      setFormData({ blueprintId: '', clientName: '', deadline: '', assignedTo: '' });
+      setFormData({ blueprintId: '', jobId: '', deadline: '', assignedTo: '' });
       setTimeout(() => setSuccess(''), 4000);
+      
+      // refresh jobs
+      const dept = user?.department ? user.department.toLowerCase() : '';
+      axios.get('http://localhost:5000/api/jobs').then(res => {
+        setJobs(res.data.filter(j => j.distribution[dept]?.status === 'PENDING'));
+      });
     } catch(err) {
       console.error(err);
     }
@@ -343,6 +359,22 @@ function Dispatcher() {
       
       <div className="card glass-panel" style={{ maxWidth: '800px' }}>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          
+          <div>
+            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Pending Sample Job</label>
+            <select value={formData.jobId} onChange={e => setFormData({...formData, jobId: e.target.value})} required>
+              <option value="" disabled>--- Select a Job ---</option>
+              {jobs.map(j => {
+                const dept = user?.department ? user.department.toLowerCase() : '';
+                return (
+                  <option key={j._id} value={j._id}>
+                    {j.jobCode} - {j.clientName} (Vol: {j.distribution[dept]?.volume})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Master Schema</label>
             <select value={formData.blueprintId} onChange={e => setFormData({...formData, blueprintId: e.target.value})} required>
@@ -351,15 +383,9 @@ function Dispatcher() {
             </select>
           </div>
 
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Client Name <span style={{color:'var(--color-text-muted)', fontWeight:400, fontSize:'0.75rem'}}>(Will be masked)</span></label>
-              <input type="text" value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} required placeholder="John Doe Corp." />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Global Deadline</label>
-              <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({...formData, deadline: e.target.value})} required />
-            </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Global Deadline</label>
+            <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({...formData, deadline: e.target.value})} required />
           </div>
 
           <div>
@@ -370,8 +396,8 @@ function Dispatcher() {
             </select>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }}>
-             Submit & Dispatch Secure Job 
+          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }} disabled={jobs.length === 0}>
+             {jobs.length === 0 ? 'No Pending Jobs' : 'Submit & Dispatch Secure Job'}
           </button>
         </form>
       </div>
@@ -393,29 +419,40 @@ export default function HeadDashboard() {
 
 function Audit() {
   const [instances, setInstances] = useState([]);
+  const [jobs, setJobs] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
 
-  const fetchInstances = async () => {
+  const fetchData = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/tests/instances');
-      setInstances(res.data.filter(i => i.status === 'COMPLETED'));
+      const resInst = await axios.get('http://localhost:5000/api/tests/instances');
+      setInstances(resInst.data.filter(i => i.status === 'COMPLETED'));
+      const resJobs = await axios.get('http://localhost:5000/api/jobs');
+      setJobs(resJobs.data);
     } catch(err) {
       console.error(err);
     }
   };
 
-  useEffect(() => { fetchInstances(); }, []);
+  useEffect(() => { fetchData(); }, []);
 
   if (selectedReport) {
     return <ReportViewer report={selectedReport} onBack={() => setSelectedReport(null)} />;
   }
 
   return (
-    <div>
-       <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-         <FileText size={28} style={{ color: 'var(--color-primary)' }}/> Department Audit Log
-       </h1>
-       <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+       <div>
+         <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+           <FileText size={28} style={{ color: 'var(--color-primary)' }}/> Department Job Logs
+         </h1>
+         <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
+       </div>
+
+       <div>
+         <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+           PDF Reports & Completed Audit
+         </h2>
+         <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
         <table>
           <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
             <tr>
@@ -446,6 +483,7 @@ function Audit() {
             )}
           </tbody>
         </table>
+       </div>
        </div>
     </div>
   );

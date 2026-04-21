@@ -9,9 +9,10 @@ const resultParameterSchema = new mongoose.Schema({
 });
 
 const testInstanceSchema = new mongoose.Schema({
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' }, // Link to Lab Head created Job
   blueprintId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestBlueprint', required: true },
   testCode: { type: String, required: true, unique: true }, // e.g. #UL-782X
-  clientName: { type: String, required: true },
+  clientName: { type: String },
   deadline: { type: Date, required: true },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   status: { type: String, enum: ['PENDING', 'COMPLETED'], default: 'PENDING' },
