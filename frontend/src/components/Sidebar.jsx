@@ -11,7 +11,7 @@ export default function Sidebar() {
       case 'ADMIN':
         return [
           { to: '/admin', icon: <LayoutDashboard size={20} />, label: 'Super Admin Tracker' },
-          { to: '/admin/users', icon: <Users size={20} />, label: 'Manage Lab Head' },
+          { to: '/admin/users', icon: <Users size={20} />, label: 'Staff Directory' },
         ];
       case 'LAB_HEAD':
         return [
@@ -60,7 +60,7 @@ export default function Sidebar() {
           <NavLink
             key={link.to}
             to={link.to}
-            end={link.to === '/admin' || link.to === '/head' || link.to === '/assistant'}
+            end={link.to === '/admin' || link.to === '/lab-head' || link.to === '/head' || link.to === '/assistant'}
             style={({ isActive }) => ({
               display: 'flex',
               alignItems: 'center',

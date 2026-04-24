@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, FileText, Search } from 'lucide-react';
+import { Trash2, Edit, FileText, Search, ChevronDown, ChevronRight } from 'lucide-react';
 import ReportViewer from '../components/ReportViewer';
 
 function Dashboard() {
@@ -35,8 +35,75 @@ function Dashboard() {
   );
 }
 
+function StaffTable({ users, emptyMessage }) {
+  if (users.length === 0) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  return (
+    <table style={{ margin: 0 }}>
+      <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+        <tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th></tr>
+      </thead>
+      <tbody>
+        {users.map(u => (
+          <tr key={u._id}>
+            <td style={{ fontWeight: 500 }}>{u.name}</td>
+            <td>{u.email}</td>
+            <td>
+              <span className={`badge ${u.role === 'ADMIN' || u.role === 'LAB_HEAD' ? 'badge-primary' : u.role === 'HEAD' ? 'badge-warning' : 'badge-success'}`}>
+                {u.role}
+              </span>
+            </td>
+            <td>{u.department || 'All'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function CollapsibleSection({ title, count, isOpen, onToggle, children }) {
+  return (
+    <div className="card" style={{ padding: 0, marginBottom: '1rem', overflow: 'hidden' }}>
+      <div 
+        onClick={onToggle}
+        style={{ 
+          padding: '1.25rem 1.5rem', 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          cursor: 'pointer',
+          backgroundColor: isOpen ? 'var(--color-surface-hover)' : 'white',
+          transition: 'background-color 0.2s'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {isOpen ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+          <h3 style={{ margin: 0 }}>{title}</h3>
+          <span className="badge badge-secondary" style={{ marginLeft: '0.5rem' }}>{count}</span>
+        </div>
+      </div>
+      {isOpen && (
+        <div style={{ borderTop: '1px solid var(--color-border)' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Users() {
   const [users, setUsers] = useState([]);
+  const [expanded, setExpanded] = useState({
+    management: true,
+    heads: true,
+    assistants: false
+  });
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', password: ''
@@ -47,7 +114,6 @@ function Users() {
   const fetchUsers = async () => {
     try {
       const res = await axios.get('http://localhost:5000/api/users');
-      // Admin sees everyone, but maybe let's just display everyone read-only.
       setUsers(res.data);
     } catch (err) {
       console.error(err);
@@ -55,6 +121,10 @@ function Users() {
   };
 
   useEffect(() => { fetchUsers(); }, []);
+
+  const toggleSection = (section) => {
+    setExpanded(prev => ({ ...prev, [section]: !prev[section] }));
+  };
 
   const handleNameChange = (e) => {
     const newName = e.target.value;
@@ -78,10 +148,14 @@ function Users() {
     }
   };
 
+  const managementUsers = users.filter(u => u.role === 'ADMIN' || u.role === 'LAB_HEAD');
+  const headUsers = users.filter(u => u.role === 'HEAD');
+  const assistantUsers = users.filter(u => u.role === 'ASSISTANT');
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h1>Users Overview</h1>
+        <h1>Staff Directory</h1>
         <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
           {showForm ? 'Close Form' : '+ Create Lab Head'}
         </button>
@@ -92,7 +166,7 @@ function Users() {
 
       {showForm && (
         <div className="card" style={{ marginBottom: '1.5rem' }}>
-          <h3 style={{ marginBottom: '1rem' }}>Create Lab Head</h3>
+          <h3 style={{ marginBottom: '1rem' }}>Create New Lab Head</h3>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <div style={{ flex: 1 }}>
@@ -123,25 +197,33 @@ function Users() {
         </div>
       )}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table>
-          <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-            <tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th></tr>
-          </thead>
-          <tbody>
-            {users.length === 0 ? (
-              <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem' }}>No users found</td></tr>
-            ) : (
-             users.map(u => (
-              <tr key={u._id}>
-                <td style={{ fontWeight: 500 }}>{u.name}</td>
-                <td>{u.email}</td>
-                <td><span className="badge badge-warning">{u.role}</span></td>
-                <td>{u.department || 'N/A'}</td>
-              </tr>
-            )))}
-          </tbody>
-        </table>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <CollapsibleSection 
+          title="Management" 
+          count={managementUsers.length}
+          isOpen={expanded.management}
+          onToggle={() => toggleSection('management')}
+        >
+          <StaffTable users={managementUsers} emptyMessage="No management staff found" />
+        </CollapsibleSection>
+
+        <CollapsibleSection 
+          title="Department Heads" 
+          count={headUsers.length}
+          isOpen={expanded.heads}
+          onToggle={() => toggleSection('heads')}
+        >
+          <StaffTable users={headUsers} emptyMessage="No department heads found" />
+        </CollapsibleSection>
+
+        <CollapsibleSection 
+          title="Lab Assistants" 
+          count={assistantUsers.length}
+          isOpen={expanded.assistants}
+          onToggle={() => toggleSection('assistants')}
+        >
+          <StaffTable users={assistantUsers} emptyMessage="No lab assistants found" />
+        </CollapsibleSection>
       </div>
     </div>
   );

@@ -61,7 +61,7 @@ export default function JobLogTable({ jobs, title = "Job Logs" }) {
               onChange={e => setStatusFilter(e.target.value)} 
               style={{ paddingLeft: '2.2rem', appearance: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', paddingBottom: '0.4rem', paddingTop: '0.4rem' }}
             >
-              <option value="ALL">All Statuses</option>
+              <option value="ALL">All Status</option>
               <option value="PENDING">Pending</option>
               <option value="IN_PROGRESS">In Progress</option>
               <option value="COMPLETED">Completed</option>

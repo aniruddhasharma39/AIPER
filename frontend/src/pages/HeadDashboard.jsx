@@ -1,18 +1,149 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Plus, Check, FileText } from 'lucide-react';
+import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
+import { Link } from 'react-router-dom';
 import ReportViewer from '../components/ReportViewer';
 import JobLogTable from '../components/JobLogTable';
 
 function Dashboard() {
+  const { user } = useContext(AuthContext);
+  const [stats, setStats] = useState({
+    pendingDispatch: 0,
+    inProgress: 0,
+    completed: 0,
+    totalAssistants: 0
+  });
+  const [recentActivity, setRecentActivity] = useState([]);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const [jobsRes, instancesRes, usersRes] = await Promise.all([
+          axios.get('http://localhost:5000/api/jobs'),
+          axios.get('http://localhost:5000/api/tests/instances'),
+          axios.get('http://localhost:5000/api/users')
+        ]);
+
+        const dept = user?.department?.toLowerCase() || '';
+        
+        setStats({
+          pendingDispatch: jobsRes.data.filter(j => j.distribution[dept]?.status === 'PENDING').length,
+          inProgress: instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo != null).length,
+          completed: instancesRes.data.filter(i => i.status === 'COMPLETED').length,
+          totalAssistants: usersRes.data.filter(u => u.role === 'ASSISTANT' && u.department === user.department).length
+        });
+
+        // Get latest 5 activities in this department
+        const sortedInstances = instancesRes.data
+          .filter(i => i.createdBy?.department === user.department || i.assignedTo?.department === user.department)
+          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+          .slice(0, 5);
+        
+        setRecentActivity(sortedInstances);
+      } catch (err) {
+        console.error('Error fetching dashboard stats:', err);
+      }
+    };
+    fetchStats();
+  }, [user]);
+
+  const StatCard = ({ icon: Icon, title, value, color, subtitle }) => (
+    <div className="card" style={{ flex: 1, minWidth: '220px', display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: `4px solid ${color}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ padding: '0.6rem', backgroundColor: `${color}15`, color: color, borderRadius: 'var(--radius-md)' }}>
+          <Icon size={20} />
+        </div>
+        <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--color-text-main)' }}>{value}</div>
+      </div>
+      <div>
+        <div style={{ fontWeight: 600, color: 'var(--color-text-main)', fontSize: '0.9rem' }}>{title}</div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{subtitle}</div>
+      </div>
+    </div>
+  );
+
   return (
     <div>
-      <h1 style={{ marginBottom: '1rem' }}>Operational Bridge</h1>
-      <div className="card">
-        <h3>Department Overview</h3>
-        <p style={{ color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>Manage department blueprints, assistants, and dispatch tasks.</p>
+      <div style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Department Control Center</h1>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: '1rem' }}>Unit {user?.department} | {user?.branch} Intelligence</p>
+        </div>
+        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textAlign: 'right' }}>
+          Real-time Telemetry Active <div style={{ display: 'inline-block', width: '8px', height: '8px', background: 'var(--color-success)', borderRadius: '50%', marginLeft: '0.5rem' }}></div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
+        <StatCard 
+          icon={Clock} 
+          title="Awaiting Dispatch" 
+          value={stats.pendingDispatch} 
+          color="var(--color-warning)" 
+          subtitle="New samples to assign" 
+        />
+        <StatCard 
+          icon={Activity} 
+          title="Live Analysis" 
+          value={stats.inProgress} 
+          color="var(--color-primary)" 
+          subtitle="Processing in lab" 
+        />
+        <StatCard 
+          icon={CheckCircle} 
+          title="Archive Ready" 
+          value={stats.completed} 
+          color="var(--color-success)" 
+          subtitle="Completed reports" 
+        />
+        <StatCard 
+          icon={Users} 
+          title="Active Analysts" 
+          value={stats.totalAssistants} 
+          color="#8B5CF6" 
+          subtitle="Available for tasks" 
+        />
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Activity size={18} /> Recent Pipeline Activity
+          </h3>
+          <Link to="/head/audit" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 500 }}>View Detailed Logs &rarr;</Link>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+              <tr>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ID / Code</th>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Client</th>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Analyst</th>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentActivity.length === 0 ? (
+                <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>No recent activity detected.</td></tr>
+              ) : (
+                recentActivity.map(inst => (
+                  <tr key={inst._id}>
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>{inst.testCode}</td>
+                    <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
+                    <td>{inst.assignedTo?.name || <span style={{ color: 'var(--color-text-muted)' }}>Unassigned</span>}</td>
+                    <td>
+                      <span className={`badge ${inst.status === 'COMPLETED' ? 'badge-success' : 'badge-warning'}`}>
+                        {inst.status === 'COMPLETED' ? 'Finished' : 'In Progress'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -76,11 +207,11 @@ function Assistants() {
   const confirmDelete = (u) => setUserToDelete(u);
 
   const handleDelete = async () => {
-    if(!userToDelete) return;
+    if (!userToDelete) return;
     try {
       await axios.delete(`http://localhost:5000/api/users/${userToDelete._id}`);
       setUserToDelete(null); fetchUsers();
-    } catch(err) {
+    } catch (err) {
       setError(err.response?.data?.message || 'Failed to delete');
       setUserToDelete(null);
     }
@@ -90,7 +221,7 @@ function Assistants() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h1>Assistants Management</h1>
-        <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); if(showForm) setEditUserId(null); }}>
+        <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); if (showForm) setEditUserId(null); }}>
           {showForm ? 'Close Form' : '+ Create Assistant'}
         </button>
       </div>
@@ -109,18 +240,18 @@ function Assistants() {
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Email Address</label>
-                <input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} required placeholder="jane@foodlab.com" />
+                <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} required placeholder="jane@foodlab.com" />
               </div>
             </div>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Phone Number</label>
-                <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} required />
+                <input type="text" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} required />
               </div>
               {!editUserId && (
                 <div style={{ flex: 1 }}>
                   <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Password (Auto-generated)</label>
-                  <input type="text" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required />
+                  <input type="text" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} required />
                 </div>
               )}
             </div>
@@ -140,26 +271,26 @@ function Assistants() {
             {users.length === 0 ? (
               <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem' }}>No assistants found</td></tr>
             ) : (
-             users.map(u => (
-              <tr key={u._id}>
-                <td style={{ fontWeight: 500 }}>{u.name}</td><td>{u.email}</td>
-                <td><span className="badge badge-success">{u.role}</span></td>
-                <td>
-                  {userToDelete && userToDelete._id === u._id ? (
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-danger)' }}>Sure?</span>
-                      <button onClick={handleDelete} className="btn-danger" style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: 'none', cursor: 'pointer' }}>Yes</button>
-                      <button onClick={() => setUserToDelete(null)} style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>No</button>
-                    </div>
-                  ) : (
-                    <>
-                      <button onClick={() => handleEdit(u)} style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', marginRight: '1rem' }}><Edit size={18}/></button>
-                      <button onClick={() => confirmDelete(u)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}><Trash2 size={18}/></button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            )))}
+              users.map(u => (
+                <tr key={u._id}>
+                  <td style={{ fontWeight: 500 }}>{u.name}</td><td>{u.email}</td>
+                  <td><span className="badge badge-success">{u.role}</span></td>
+                  <td>
+                    {userToDelete && userToDelete._id === u._id ? (
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--color-danger)' }}>Sure?</span>
+                        <button onClick={handleDelete} className="btn-danger" style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: 'none', cursor: 'pointer' }}>Yes</button>
+                        <button onClick={() => setUserToDelete(null)} style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>No</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button onClick={() => handleEdit(u)} style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', marginRight: '1rem' }}><Edit size={18} /></button>
+                        <button onClick={() => confirmDelete(u)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}><Trash2 size={18} /></button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              )))}
           </tbody>
         </table>
       </div>
@@ -174,7 +305,7 @@ function Blueprints() {
   const [error, setError] = useState('');
   const { user } = useContext(AuthContext);
   const defaultUnits = ["mg/L", "ppm", "pH", "%", "CFU/g", "Custom..."];
-  
+
   const [parameters, setParameters] = useState([
     { name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }
   ]);
@@ -207,6 +338,10 @@ function Blueprints() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (parameters.length === 0) {
+      setError('At least one parameter is required');
+      return;
+    }
     try {
       const finalParams = parameters.map(p => ({
         name: p.name,
@@ -230,61 +365,49 @@ function Blueprints() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h1>Test Blueprints</h1>
         <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Close Form' : '+ Build Blueprint'}
+          {showForm ? 'Close' : '+ New Blueprint'}
         </button>
       </div>
 
       {showForm && (
         <div className="card" style={{ marginBottom: '1.5rem' }}>
-          <h3 style={{ marginBottom: '1rem' }}>Build a Master Schema</h3>
+          <h3 style={{ marginBottom: '1rem' }}>Create Test Blueprint</h3>
           {error && <div style={{ marginBottom: '1rem', color: 'var(--color-danger)', backgroundColor: 'var(--color-danger-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{error}</div>}
-          <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Test / Schema Name</label>
-              <input type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Soil Chemistry Profile" />
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <input style={{ flex: 1 }} type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="Blueprint Name (e.g. Soil Chemistry Profile)" />
             </div>
 
-            <div style={{ marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--color-border)' }}>
-              <h4 style={{ color: 'var(--color-primary)' }}>Parameters</h4>
+            <div style={{ marginTop: '0.5rem' }}>
+              <h4 style={{ marginBottom: '1rem' }}>Parameters</h4>
             </div>
 
             {parameters.map((p, i) => (
-              <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                <div style={{ flex: 2 }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Parameter Name</label>
-                  <input type="text" value={p.name} onChange={e => updateParameter(i, 'name', e.target.value)} required placeholder="e.g. pH Level" />
-                </div>
-                <div style={{ flex: 1.5 }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Reference Range</label>
-                  <input type="text" value={p.referenceRange} onChange={e => updateParameter(i, 'referenceRange', e.target.value)} required placeholder="e.g. 6.5 - 7.5" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Unit</label>
-                  <select value={p.unitType} onChange={e => updateParameter(i, 'unitType', e.target.value)} required>
-                    {defaultUnits.map(du => <option key={du} value={du}>{du}</option>)}
-                  </select>
-                </div>
+              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input style={{ flex: 2 }} type="text" value={p.name} onChange={e => updateParameter(i, 'name', e.target.value)} required placeholder="Parameter Name" />
+                <input style={{ flex: 1.5 }} type="text" value={p.referenceRange} onChange={e => updateParameter(i, 'referenceRange', e.target.value)} required placeholder="Reference Range" />
+                <select style={{ flex: 1 }} value={p.unitType} onChange={e => updateParameter(i, 'unitType', e.target.value)} required>
+                  {defaultUnits.map(du => <option key={du} value={du}>{du}</option>)}
+                </select>
                 {p.unitType === 'Custom...' && (
-                  <div style={{ flex: 1 }}>
-                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.2rem' }}>Custom Unit</label>
-                    <input type="text" value={p.customUnit} onChange={e => updateParameter(i, 'customUnit', e.target.value)} required placeholder="g/mol" />
-                  </div>
+                  <input style={{ flex: 1 }} type="text" value={p.customUnit} onChange={e => updateParameter(i, 'customUnit', e.target.value)} required placeholder="Custom Unit" />
                 )}
                 {parameters.length > 1 && (
-                  <button type="button" onClick={() => removeParameterRow(i)} style={{ alignSelf: 'flex-end', marginBottom: '0.4rem', border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}>
+                  <button type="button" onClick={() => removeParameterRow(i)} style={{ border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0 0.5rem' }}>
                     <Trash2 size={20} />
                   </button>
                 )}
               </div>
             ))}
 
-            <button type="button" onClick={addParameterRow} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'none', border: '1px dashed var(--color-primary)', color: 'var(--color-primary)', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', marginBottom: '1.5rem', width: '100%', justifyContent: 'center' }}>
-              <Plus size={16} /> Add Another Parameter
-            </button>
-
-            <button type="submit" className="btn btn-success" style={{ backgroundColor: 'var(--color-success)', color: 'white', width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}>
-              <Check size={18} /> Save Schema
-            </button>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+              <button type="button" onClick={addParameterRow} className="btn" style={{ border: '1px solid var(--color-border)', alignSelf: 'flex-start' }}>
+                + Add Parameter
+              </button>
+              <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>
+                Save Blueprint
+              </button>
+            </div>
           </form>
         </div>
       )}
@@ -316,7 +439,7 @@ function Dispatcher() {
   const [blueprints, setBlueprints] = useState([]);
   const [jobs, setJobs] = useState([]);
   const { user } = useContext(AuthContext);
-  
+
   const [formData, setFormData] = useState({
     blueprintId: '', jobId: '', deadline: '', assignedTo: ''
   });
@@ -325,7 +448,7 @@ function Dispatcher() {
   useEffect(() => {
     axios.get('http://localhost:5000/api/users').then(res => setAssistants(res.data)).catch(console.error);
     axios.get('http://localhost:5000/api/tests/blueprints').then(res => setBlueprints(res.data)).catch(console.error);
-    
+
     // Fetch Jobs assigned to this head
     axios.get('http://localhost:5000/api/jobs').then(res => {
       const dept = user?.department ? user.department.toLowerCase() : '';
@@ -338,16 +461,16 @@ function Dispatcher() {
     e.preventDefault();
     try {
       await axios.post('http://localhost:5000/api/tests/instances', formData);
-      setSuccess('Job Dispatched successfully. It is now completely blinded for the assistant.');
+      setSuccess('Job dispatched successfully!');
       setFormData({ blueprintId: '', jobId: '', deadline: '', assignedTo: '' });
       setTimeout(() => setSuccess(''), 4000);
-      
+
       // refresh jobs
       const dept = user?.department ? user.department.toLowerCase() : '';
       axios.get('http://localhost:5000/api/jobs').then(res => {
         setJobs(res.data.filter(j => j.distribution[dept]?.status === 'PENDING'));
       });
-    } catch(err) {
+    } catch (err) {
       console.error(err);
     }
   };
@@ -356,13 +479,13 @@ function Dispatcher() {
     <div>
       <h1 style={{ marginBottom: '1.5rem' }}>Job Dispatcher</h1>
       {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
-      
+
       <div className="card glass-panel" style={{ maxWidth: '800px' }}>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
+
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Pending Sample Job</label>
-            <select value={formData.jobId} onChange={e => setFormData({...formData, jobId: e.target.value})} required>
+            <select value={formData.jobId} onChange={e => setFormData({ ...formData, jobId: e.target.value })} required>
               <option value="" disabled>--- Select a Job ---</option>
               {jobs.map(j => {
                 const dept = user?.department ? user.department.toLowerCase() : '';
@@ -377,7 +500,7 @@ function Dispatcher() {
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Master Schema</label>
-            <select value={formData.blueprintId} onChange={e => setFormData({...formData, blueprintId: e.target.value})} required>
+            <select value={formData.blueprintId} onChange={e => setFormData({ ...formData, blueprintId: e.target.value })} required>
               <option value="" disabled>--- Select a Schema ---</option>
               {blueprints.map(bp => <option key={bp._id} value={bp._id}>{bp.name} ({bp.parameters.length} params)</option>)}
             </select>
@@ -385,19 +508,19 @@ function Dispatcher() {
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Global Deadline</label>
-            <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({...formData, deadline: e.target.value})} required />
+            <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({ ...formData, deadline: e.target.value })} required />
           </div>
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Assign to Lab Assistant</label>
-            <select value={formData.assignedTo} onChange={e => setFormData({...formData, assignedTo: e.target.value})} required>
+            <select value={formData.assignedTo} onChange={e => setFormData({ ...formData, assignedTo: e.target.value })} required>
               <option value="" disabled>--- Assign Assistant ---</option>
               {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name} ({ast.email})</option>)}
             </select>
           </div>
 
           <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }} disabled={jobs.length === 0}>
-             {jobs.length === 0 ? 'No Pending Jobs' : 'Submit & Dispatch Secure Job'}
+            {jobs.length === 0 ? 'No Pending Jobs' : 'Submit & Dispatch Secure Job'}
           </button>
         </form>
       </div>
@@ -428,7 +551,7 @@ function Audit() {
       setInstances(resInst.data.filter(i => i.status === 'COMPLETED'));
       const resJobs = await axios.get('http://localhost:5000/api/jobs');
       setJobs(resJobs.data);
-    } catch(err) {
+    } catch (err) {
       console.error(err);
     }
   };
@@ -441,50 +564,50 @@ function Audit() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-       <div>
-         <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-           <FileText size={28} style={{ color: 'var(--color-primary)' }}/> Department Job Logs
-         </h1>
-         <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
-       </div>
+      <div>
+        <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <FileText size={28} style={{ color: 'var(--color-primary)' }} /> Department Job Logs
+        </h1>
+        <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
+      </div>
 
-       <div>
-         <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-           PDF Reports & Completed Audit
-         </h2>
-         <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-        <table>
-          <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-            <tr>
-              <th>Test Code</th>
-              <th>Client Name</th>
-              <th>Blueprint</th>
-              <th>Analyst</th>
-              <th>Date Completed</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {instances.length === 0 ? (
-              <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests in your department yet.</td></tr>
-            ) : (
-              instances.map(inst => (
-                <tr key={inst._id}>
-                  <td style={{ fontFamily: 'monospace' }}>{inst.testCode}</td>
-                  <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
-                  <td>{inst.blueprintId?.name}</td>
-                  <td>{inst.assignedTo?.name}</td>
-                  <td>{new Date(inst.completedAt).toLocaleDateString()}</td>
-                  <td>
-                    <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-       </div>
-       </div>
+      <div>
+        <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          PDF Reports & Completed Audit
+        </h2>
+        <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+          <table>
+            <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+              <tr>
+                <th>Test Code</th>
+                <th>Client Name</th>
+                <th>Blueprint</th>
+                <th>Analyst</th>
+                <th>Date Completed</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {instances.length === 0 ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests in your department yet.</td></tr>
+              ) : (
+                instances.map(inst => (
+                  <tr key={inst._id}>
+                    <td style={{ fontFamily: 'monospace' }}>{inst.testCode}</td>
+                    <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
+                    <td>{inst.blueprintId?.name}</td>
+                    <td>{inst.assignedTo?.name}</td>
+                    <td>{new Date(inst.completedAt).toLocaleDateString()}</td>
+                    <td>
+                      <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

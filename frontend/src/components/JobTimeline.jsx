@@ -47,7 +47,7 @@ export default function JobTimeline({ job }) {
         
         {/* Step 2: Domain Head Dispatching to Assistant */}
         <Step 
-          title="Dispatched to Assistant" 
+          title={isDispatched ? "Dispatched to Assistant" : "Dispatch Pending"} 
           user={instance?.assignedTo?.name || 'Waiting for Dispatch'} 
           date={instance?.createdAt} 
           completed={isDispatched}
@@ -56,8 +56,8 @@ export default function JobTimeline({ job }) {
 
         {/* Step 3: Analysis Completed */}
         <Step 
-          title="Analysis Completed" 
-          user={instance?.assignedTo?.name} 
+          title={isCompleted ? "Analysis Completed" : "Analysis Pending"} 
+          user={instance?.assignedTo?.name || (isDispatched ? 'Pending Analysis' : 'Waiting for Dispatch')} 
           date={instance?.completedAt} 
           completed={isCompleted}
           isLast={true}

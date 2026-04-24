@@ -30,6 +30,61 @@ function Dashboard() {
   );
 }
 
+function UserSection({ title, users, onEdit, onDelete, userToDelete, setUserToDelete, onConfirmDelete }) {
+  return (
+    <div style={{ marginBottom: '2.5rem' }}>
+      <h3 style={{ 
+        marginBottom: '1rem', 
+        color: 'var(--color-text-main)', 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: '0.5rem' 
+      }}>
+        <div style={{ width: '4px', height: '1.5rem', backgroundColor: 'var(--color-primary)', borderRadius: 'var(--radius-full)' }}></div>
+        {title}
+        <span className="badge badge-secondary" style={{ fontSize: '0.8rem', marginLeft: '0.5rem' }}>{users.length}</span>
+      </h3>
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        {users.length === 0 ? (
+          <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+            No {title.toLowerCase()} currently registered in the system.
+          </div>
+        ) : (
+          <table>
+            <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+              <tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u._id}>
+                  <td style={{ fontWeight: 500 }}>{u.name}</td>
+                  <td>{u.email}</td>
+                  <td><span className={`badge ${u.role === 'HEAD' ? 'badge-warning' : 'badge-success'}`}>{u.role}</span></td>
+                  <td>{u.department || 'N/A'}</td>
+                  <td>
+                    {userToDelete && userToDelete._id === u._id ? (
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--color-danger)' }}>Sure?</span>
+                        <button onClick={async () => { await onConfirmDelete(u._id); setUserToDelete(null); }} className="btn-danger" style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: 'none', cursor: 'pointer' }}>Yes</button>
+                        <button onClick={() => setUserToDelete(null)} style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>No</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button onClick={() => onEdit(u)} style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', marginRight: '1rem' }}><Edit size={18}/></button>
+                        <button onClick={() => setUserToDelete(u)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}><Trash2 size={18}/></button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Users() {
   const [users, setUsers] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -81,6 +136,19 @@ function Users() {
     setEditUserId(u._id); setShowForm(true); setError(''); setSuccess('');
   };
 
+  const confirmDelete = async (id) => {
+    try {
+      await axios.delete(`http://localhost:5000/api/users/${id}`);
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+      setError('Failed to delete user');
+    }
+  };
+
+  const headUsers = users.filter(u => u.role === 'HEAD');
+  const assistantUsers = users.filter(u => u.role === 'ASSISTANT');
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -94,7 +162,7 @@ function Users() {
       {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
 
       {showForm && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div className="card" style={{ marginBottom: '2.5rem' }}>
           <h3 style={{ marginBottom: '1rem' }}>{editUserId ? 'Edit User' : 'Create User'}</h3>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', gap: '1rem' }}>
@@ -142,37 +210,23 @@ function Users() {
         </div>
       )}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table>
-          <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-            <tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Action</th></tr>
-          </thead>
-          <tbody>
-             {users.map(u => (
-              <tr key={u._id}>
-                <td style={{ fontWeight: 500 }}>{u.name}</td>
-                <td>{u.email}</td>
-                <td><span className="badge badge-warning">{u.role}</span></td>
-                <td>{u.department || 'N/A'}</td>
-                <td>
-                  {userToDelete && userToDelete._id === u._id ? (
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--color-danger)' }}>Sure?</span>
-                      <button onClick={async () => { await axios.delete(`http://localhost:5000/api/users/${u._id}`); setUserToDelete(null); fetchUsers(); }} className="btn-danger" style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: 'none', cursor: 'pointer' }}>Yes</button>
-                      <button onClick={() => setUserToDelete(null)} style={{ padding: '0.2rem 0.6rem', fontSize: '0.8rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>No</button>
-                    </div>
-                  ) : (
-                    <>
-                      <button onClick={() => handleEdit(u)} style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', marginRight: '1rem' }}><Edit size={18}/></button>
-                      <button onClick={() => setUserToDelete(u)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer' }}><Trash2 size={18}/></button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <UserSection 
+        title="Department Heads" 
+        users={headUsers} 
+        onEdit={handleEdit} 
+        onConfirmDelete={confirmDelete} 
+        userToDelete={userToDelete} 
+        setUserToDelete={setUserToDelete} 
+      />
+
+      <UserSection 
+        title="Lab Assistants" 
+        users={assistantUsers} 
+        onEdit={handleEdit} 
+        onConfirmDelete={confirmDelete} 
+        userToDelete={userToDelete} 
+        setUserToDelete={setUserToDelete} 
+      />
     </div>
   );
 }
@@ -303,13 +357,17 @@ function Jobs() {
 
             <div style={{ display: 'flex', gap: '1.5rem' }}>
               {/* MICRO SECTION */}
-              <div style={{ flex: 1, padding: '1rem', border: formData.microRequired ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, marginBottom: '1rem' }}>
-                  <input type="checkbox" checked={formData.microRequired} onChange={e => setFormData({ ...formData, microRequired: e.target.checked })} />
-                  Distribute to MICRO
-                </label>
+              <div 
+                className={`selectable-card ${formData.microRequired ? 'selected' : ''}`}
+                onClick={() => setFormData(prev => ({ ...prev, microRequired: !prev.microRequired }))}
+                style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Distribute to MICRO</span>
+                  {formData.microRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
+                </div>
                 {formData.microRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Micro Volume</label>
                       <input type="number" step="0.01" value={formData.microVolume} onChange={e => handleMicroChange(e.target.value)} required />
@@ -326,13 +384,17 @@ function Jobs() {
               </div>
 
               {/* MACRO SECTION */}
-              <div style={{ flex: 1, padding: '1rem', border: formData.macroRequired ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, marginBottom: '1rem' }}>
-                  <input type="checkbox" checked={formData.macroRequired} onChange={e => setFormData({ ...formData, macroRequired: e.target.checked })} />
-                  Distribute to MACRO
-                </label>
+              <div 
+                className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`}
+                onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))}
+                style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Distribute to MACRO</span>
+                  {formData.macroRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
+                </div>
                 {formData.macroRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Macro Volume</label>
                       <input type="number" step="0.01" value={formData.macroVolume} onChange={e => handleMacroChange(e.target.value)} required />
@@ -367,7 +429,7 @@ function Jobs() {
 function Blueprints() {
   const [blueprints, setBlueprints] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ name: '', department: 'Micro', parameters: [] });
+  const [formData, setFormData] = useState({ name: '', department: 'Micro', parameters: [{ name: '', unit: '', referenceRange: '' }] });
 
   const fetchBlueprints = async () => {
     try {
@@ -382,10 +444,11 @@ function Blueprints() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (formData.parameters.length === 0) return alert('At least one parameter is required');
     try {
       await axios.post('http://localhost:5000/api/tests/blueprints', formData);
       setShowForm(false);
-      setFormData({ name: '', department: 'Micro', parameters: [] });
+      setFormData({ name: '', department: 'Micro', parameters: [{ name: '', unit: '', referenceRange: '' }] });
       fetchBlueprints();
     } catch (err) { alert('Error creating blueprint'); }
   };
@@ -410,14 +473,21 @@ function Blueprints() {
             </div>
             <h4>Parameters</h4>
             {formData.parameters.map((p, i) => (
-              <div key={i} style={{ display: 'flex', gap: '0.5rem' }}>
+              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <input style={{ flex: 2 }} type="text" placeholder="Parameter Name" value={p.name} onChange={e => { const newParams = [...formData.parameters]; newParams[i].name = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
                 <input style={{ flex: 1 }} type="text" placeholder="Unit" value={p.unit} onChange={e => { const newParams = [...formData.parameters]; newParams[i].unit = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
                 <input style={{ flex: 1 }} type="text" placeholder="Range" value={p.referenceRange} onChange={e => { const newParams = [...formData.parameters]; newParams[i].referenceRange = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
+                {formData.parameters.length > 1 && (
+                  <button type="button" onClick={() => setFormData(prev => ({ ...prev, parameters: prev.parameters.filter((_, idx) => idx !== i) }))} style={{ border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0 0.5rem' }}>
+                    <Trash2 size={20} />
+                  </button>
+                )}
               </div>
             ))}
-            <button type="button" onClick={addParam} className="btn" style={{ border: '1px solid var(--color-border)', alignSelf: 'flex-start' }}>+ Add Parameter</button>
-            <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>Save Blueprint</button>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+              <button type="button" onClick={addParam} className="btn" style={{ border: '1px solid var(--color-border)', alignSelf: 'flex-start' }}>+ Add Parameter</button>
+              <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>Save Blueprint</button>
+            </div>
           </form>
         </div>
       )}
