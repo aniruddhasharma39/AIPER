@@ -200,3 +200,34 @@ tr:hover {
   background-color: var(--color-surface-hover);
 }
 
+/* Modern Animations & Backgrounds */
+.mesh-gradient {
+  background: radial-gradient(at 0% 0%, hsla(210,100%,10%,1) 0, transparent 50%), 
+              radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+              radial-gradient(at 100% 0%, hsla(210,100%,10%,1) 0, transparent 50%),
+              #1A252F;
+  background-size: 100% 100%;
+}
+
+.premium-glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

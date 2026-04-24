@@ -1,8 +1,9 @@
 import React, { useState, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Lock, Mail, ArrowRight } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Activity } from 'lucide-react';
 import axios from 'axios';
+import logo from '../assets/Acropolis20Logo.png';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -10,8 +11,7 @@ export default function Login() {
   const [newPassword, setNewPassword] = useState('');
   const [requiresChange, setRequiresChange] = useState(false);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState('LOGIN'); // 'LOGIN' or 'OTP'
-  const { login, user } = useContext(AuthContext);
+  const { login } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const handleLoginSubmit = async (e) => {
@@ -25,7 +25,7 @@ export default function Login() {
         redirectRole(u.role);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Login failed');
+      setError(err.response?.data?.message || 'Invalid credentials');
     }
   };
 
@@ -33,7 +33,6 @@ export default function Login() {
     e.preventDefault();
     try {
       await axios.put('http://localhost:5000/api/auth/change-password', { newPassword });
-      // Update local storage user flag
       const updatedUser = { ...JSON.parse(localStorage.getItem('user')), requiresPasswordChange: false };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       redirectRole(updatedUser.role);
@@ -50,73 +49,83 @@ export default function Login() {
   };
 
   return (
-    <div className="flex-center" style={{ height: '100vh', backgroundColor: 'var(--color-primary-dark)' }}>
-      <div className="card glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '2.5rem' }}>
+    <div className="flex-center mesh-gradient" style={{ height: '100vh', width: '100vw', overflow: 'hidden' }}>
+      {/* Decorative Blur Orbs */}
+      <div style={{ position: 'absolute', top: '15%', left: '10%', width: '350px', height: '350px', background: 'radial-gradient(circle, rgba(64,158,255,0.1) 0%, transparent 70%)', filter: 'blur(60px)', zIndex: 1 }}></div>
+      <div style={{ position: 'absolute', bottom: '15%', right: '10%', width: '450px', height: '450px', background: 'radial-gradient(circle, rgba(16,185,129,0.05) 0%, transparent 70%)', filter: 'blur(70px)', zIndex: 1 }}></div>
+
+      <div className="premium-glass fade-in-up" style={{ width: '100%', maxWidth: '420px', padding: '3.5rem', borderRadius: '28px', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.9)', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div className="flex-center" style={{ margin: '0 auto 1rem', width: '56px', height: '56px', backgroundColor: 'var(--color-primary)', borderRadius: 'var(--radius-lg)' }}>
-            <Shield color="white" size={32} />
-          </div>
-          <h2 style={{ color: 'var(--color-primary-dark)' }}>FoodLab Portal</h2>
-          <p style={{ color: 'var(--color-primary-light)', fontSize: '0.9rem', marginTop: '0.5rem' }}>Secure Scientific OS Access</p>
+          <img
+            src={logo}
+            alt="Acropolis Logo"
+            style={{ width: '300px', marginBottom: '1rem' }}
+          />
         </div>
 
-        {error && <div style={{ backgroundColor: 'var(--color-danger-light)', color: 'var(--color-danger)', padding: '0.75rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', fontSize: '0.9rem' }}>{error}</div>}
+        {error && (
+          <div style={{ backgroundColor: 'var(--color-danger-light)', border: '1px solid var(--color-danger)', color: 'var(--color-danger)', padding: '1rem', borderRadius: '14px', marginBottom: '1.5rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <Activity size={16} /> {error}
+          </div>
+        )}
 
         {requiresChange ? (
-          <form onSubmit={handleChangePassword}>
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, color: 'var(--color-text-main)' }}>Mandatory Password Change</label>
+          <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.6rem', fontWeight: 500, color: 'var(--color-text-main)', fontSize: '0.85rem' }}>New Password</label>
               <div style={{ position: 'relative' }}>
-                <Lock size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-                <input 
-                  type="password" 
-                  placeholder="Enter new password" 
-                  style={{ paddingLeft: '2.5rem' }}
+                <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                <input
+                  type="password"
+                  placeholder="Enter new secure password"
+                  style={{ paddingLeft: '3rem', background: '#FFFFFF', border: '1px solid var(--color-border)', color: 'var(--color-text-main)', height: '54px', borderRadius: '14px' }}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  required 
+                  required
                 />
               </div>
             </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-              Update & Continue <ArrowRight size={18} />
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', height: '54px', borderRadius: '14px', fontWeight: 600 }}>
+              Update Password <ArrowRight size={18} />
             </button>
           </form>
         ) : (
-          <form onSubmit={handleLoginSubmit}>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, color: 'var(--color-text-main)' }}>Email Address</label>
+          <form onSubmit={handleLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.6rem', fontWeight: 500, color: 'var(--color-text-main)', fontSize: '0.85rem' }}>Email Address</label>
               <div style={{ position: 'relative' }}>
-                <Mail size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-                <input 
-                  type="email" 
-                  placeholder="admin@foodlab.com" 
-                  style={{ paddingLeft: '2.5rem' }}
+                <Mail size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                <input
+                  type="email"
+                  placeholder="name@acropolis.com"
+                  style={{ paddingLeft: '3rem', background: '#FFFFFF', border: '1px solid var(--color-border)', color: 'var(--color-text-main)', height: '54px', borderRadius: '14px' }}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  required 
+                  required
                 />
               </div>
             </div>
-            <div style={{ marginBottom: '1.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <label style={{ fontWeight: 500, color: 'var(--color-text-main)' }}>Password</label>
-                <button type="button" onClick={() => alert('OTP Flow mocked.')} style={{ background: 'none', border: 'none', color: 'var(--color-primary)', fontSize: '0.8rem', cursor: 'pointer' }}>Forgot? Use OTP</button>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <label style={{ fontWeight: 500, color: 'var(--color-text-main)', fontSize: '0.85rem' }}>Password</label>
+                <button type="button" style={{ background: 'none', border: 'none', color: 'var(--color-primary)', fontSize: '0.8rem', cursor: 'pointer' }}>Forgot Password?</button>
               </div>
               <div style={{ position: 'relative' }}>
-                <Lock size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-                <input 
-                  type="password" 
-                  placeholder="••••••••" 
-                  style={{ paddingLeft: '2.5rem' }}
+                <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  style={{ paddingLeft: '3rem', background: '#FFFFFF', border: '1px solid var(--color-border)', color: 'var(--color-text-main)', height: '54px', borderRadius: '14px' }}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required 
+                  required
                 />
               </div>
             </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-              Authenticate <ArrowRight size={18} />
+
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', height: '54px', borderRadius: '14px', fontWeight: 600, marginTop: '1rem' }}>
+              Login <ArrowRight size={18} />
             </button>
           </form>
         )}
