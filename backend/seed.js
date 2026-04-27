@@ -7,7 +7,7 @@ dotenv.config();
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(async () => {
-    console.log('Connected to local MongoDB for seeding');
+    console.log('Connected to MongoDB Atlas for seeding');
     
     const adminExists = await User.findOne({ email: 'admin@foodlab.com' });
     if (!adminExists) {
