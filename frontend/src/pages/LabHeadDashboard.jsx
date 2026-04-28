@@ -1,29 +1,150 @@
-import React, { useState, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import React, { useState, useEffect, useContext } from 'react';
+import { Routes, Route, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Settings } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
-
+import ReportViewer from '../components/ReportViewer';
+import { AuthContext } from '../context/AuthContext';
 function Dashboard() {
-  const [jobs, setJobs] = useState([]);
+  const { user } = useContext(AuthContext);
+  const [stats, setStats] = useState({
+    pendingDispatch: 0,
+    inProgress: 0,
+    completed: 0,
+    totalAssistants: 0
+  });
+  const [recentActivity, setRecentActivity] = useState([]);
 
   useEffect(() => {
-    axios.get('http://localhost:5000/api/jobs')
-      .then(res => setJobs(res.data))
-      .catch(console.error);
-  }, []);
+    const fetchStats = async () => {
+      try {
+        const [jobsRes, instancesRes, usersRes] = await Promise.all([
+          axios.get('http://localhost:5000/api/jobs'),
+          axios.get('http://localhost:5000/api/tests/instances'),
+          axios.get('http://localhost:5000/api/users')
+        ]);
+
+        // Lab Head oversees all departments
+        let pending = 0;
+        jobsRes.data.forEach(j => {
+          if (j.distribution?.micro?.status === 'PENDING') pending++;
+          if (j.distribution?.macro?.status === 'PENDING') pending++;
+        });
+
+        setStats({
+          pendingDispatch: pending,
+          inProgress: instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo != null).length,
+          completed: instancesRes.data.filter(i => i.status === 'COMPLETED').length,
+          totalAssistants: usersRes.data.filter(u => u.role === 'ASSISTANT').length
+        });
+
+        // Get latest 5 activities overall
+        const sortedInstances = instancesRes.data
+          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+          .slice(0, 5);
+        
+        setRecentActivity(sortedInstances);
+      } catch (err) {
+        console.error('Error fetching dashboard stats:', err);
+      }
+    };
+    fetchStats();
+  }, [user]);
+
+  const StatCard = ({ icon: Icon, title, value, color, subtitle }) => (
+    <div className="card" style={{ flex: 1, minWidth: '220px', display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: `4px solid ${color}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ padding: '0.6rem', backgroundColor: `${color}15`, color: color, borderRadius: 'var(--radius-md)' }}>
+          <Icon size={20} />
+        </div>
+        <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--color-text-main)' }}>{value}</div>
+      </div>
+      <div>
+        <div style={{ fontWeight: 600, color: 'var(--color-text-main)', fontSize: '0.9rem' }}>{title}</div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{subtitle}</div>
+      </div>
+    </div>
+  );
 
   return (
     <div>
-      <h1 style={{ marginBottom: '1rem' }}>Lab Head Dashboard</h1>
-      <div className="card">
-        <h3>Overview</h3>
-        <p style={{ color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>Monitor lab volume and operations.</p>
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-          <div style={{ flex: 1, padding: '1rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>Total Jobs Created</div>
-            <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--color-primary)' }}>{jobs.length}</div>
-          </div>
+      <div style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Lab Head Command Center</h1>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: '1rem' }}>Global Laboratory Intelligence</p>
+        </div>
+        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textAlign: 'right' }}>
+          Real-time Telemetry Active <div style={{ display: 'inline-block', width: '8px', height: '8px', background: 'var(--color-success)', borderRadius: '50%', marginLeft: '0.5rem' }}></div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
+        <StatCard 
+          icon={Clock} 
+          title="Awaiting Dispatch" 
+          value={stats.pendingDispatch} 
+          color="var(--color-warning)" 
+          subtitle="New samples to assign" 
+        />
+        <StatCard 
+          icon={Activity} 
+          title="Live Analysis" 
+          value={stats.inProgress} 
+          color="var(--color-primary)" 
+          subtitle="Processing in lab" 
+        />
+        <StatCard 
+          icon={CheckCircle} 
+          title="Archive Ready" 
+          value={stats.completed} 
+          color="var(--color-success)" 
+          subtitle="Completed reports" 
+        />
+        <StatCard 
+          icon={UsersIcon} 
+          title="Active Analysts" 
+          value={stats.totalAssistants} 
+          color="#8B5CF6" 
+          subtitle="Available for tasks" 
+        />
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Activity size={18} /> Recent Pipeline Activity
+          </h3>
+          <Link to="/lab-head/audit" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 500 }}>View Detailed Logs &rarr;</Link>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+              <tr>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ID / Code</th>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Client</th>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Analyst</th>
+                <th style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentActivity.length === 0 ? (
+                <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>No recent activity detected.</td></tr>
+              ) : (
+                recentActivity.map(inst => (
+                  <tr key={inst._id}>
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>{inst.testCode}</td>
+                    <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
+                    <td>{inst.assignedTo?.name || <span style={{ color: 'var(--color-text-muted)' }}>Unassigned</span>}</td>
+                    <td>
+                      <span className={`badge ${inst.status === 'COMPLETED' ? 'badge-success' : 'badge-warning'}`}>
+                        {inst.status === 'COMPLETED' ? 'Finished' : 'In Progress'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -513,6 +634,78 @@ function Blueprints() {
 }
 
 
+function Audit() {
+  const [instances, setInstances] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+
+  const fetchData = async () => {
+    try {
+      const resInst = await axios.get('http://localhost:5000/api/tests/instances');
+      setInstances(resInst.data.filter(i => i.status === 'COMPLETED'));
+      const resJobs = await axios.get('http://localhost:5000/api/jobs');
+      setJobs(resJobs.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  if (selectedReport) {
+    return <ReportViewer report={selectedReport} onBack={() => setSelectedReport(null)} />;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <div>
+        <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <FileText size={28} style={{ color: 'var(--color-primary)' }} /> Global Job Logs
+        </h1>
+        <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
+      </div>
+
+      <div>
+        <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          PDF Reports & Completed Audit
+        </h2>
+        <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+          <table>
+            <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+              <tr>
+                <th>Test Code</th>
+                <th>Client Name</th>
+                <th>Blueprint</th>
+                <th>Analyst</th>
+                <th>Date Completed</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {instances.length === 0 ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests yet.</td></tr>
+              ) : (
+                instances.map(inst => (
+                  <tr key={inst._id}>
+                    <td style={{ fontFamily: 'monospace' }}>{inst.testCode}</td>
+                    <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
+                    <td>{inst.blueprintId?.name}</td>
+                    <td>{inst.assignedTo?.name}</td>
+                    <td>{new Date(inst.completedAt).toLocaleDateString()}</td>
+                    <td>
+                      <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LabHeadDashboard() {
   return (
     <Routes>
@@ -520,6 +713,7 @@ export default function LabHeadDashboard() {
       <Route path="/jobs" element={<Jobs />} />
       <Route path="/blueprints" element={<Blueprints />} />
       <Route path="/users" element={<Users />} />
+      <Route path="/audit" element={<Audit />} />
     </Routes>
   );
 }
