@@ -82,7 +82,7 @@ export default function JobTimeline({ job }) {
       {/* Branching */}
       <div style={{ display: 'flex', gap: '2rem', marginTop: '1.5rem', paddingLeft: '2rem' }}>
         <DepartmentBranch deptName="MICRO" distData={job.distribution?.micro} instance={microInstance} />
-        <DepartmentBranch deptName="MACRO" distData={job.distribution?.macro} instance={macroInstance} />
+        <DepartmentBranch deptName="CHEMICAL" distData={job.distribution?.macro} instance={macroInstance} />
       </div>
     </div>
   );

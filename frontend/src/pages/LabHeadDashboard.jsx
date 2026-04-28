@@ -312,7 +312,7 @@ function UsersPage() {
                 <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Department</label>
                 <select value={formData.department} onChange={e => setFormData({...formData, department: e.target.value})} required>
                   <option value="Micro">Micro</option>
-                  <option value="Macro">Macro</option>
+                  <option value="Macro">Chemical</option>
                 </select>
               </div>
             </div>
@@ -504,20 +504,20 @@ function Jobs() {
                 )}
               </div>
 
-              {/* MACRO SECTION */}
+              {/* CHEMICAL SECTION */}
               <div 
                 className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`}
                 onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))}
                 style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
               >
                 <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to MACRO</span>
+                  <span>Distribute to CHEMICAL</span>
                   {formData.macroRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
                 </div>
                 {formData.macroRequired && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Macro Volume</label>
+                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Chemical Volume</label>
                       <input type="number" step="0.01" value={formData.macroVolume} onChange={e => handleMacroChange(e.target.value)} required />
                     </div>
                     <div>
@@ -589,7 +589,7 @@ function Blueprints() {
               <input style={{ flex: 2 }} type="text" placeholder="Blueprint Name (e.g. Complete Blood Count)" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} required />
               <select style={{ flex: 1 }} value={formData.department} onChange={e => setFormData(p => ({ ...p, department: e.target.value }))}>
                 <option value="Micro">Micro</option>
-                <option value="Macro">Macro</option>
+                <option value="Macro">Chemical</option>
               </select>
             </div>
             <h4>Parameters</h4>
