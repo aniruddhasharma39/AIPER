@@ -25,7 +25,7 @@ const testInstanceSchema = new mongoose.Schema({
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   status: {
     type: String,
-    enum: ['PENDING', 'PENDING_HEAD_REVIEW', 'PENDING_LAB_HEAD_REVIEW', 'COMPLETED'],
+    enum: ['PENDING', 'PENDING_HEAD_REVIEW', 'PENDING_LAB_HEAD_REVIEW', 'COMPLETED', 'REOPENED'],
     default: 'PENDING'
   },
   results: [resultParameterSchema],
@@ -38,7 +38,9 @@ const testInstanceSchema = new mongoose.Schema({
   // a new TestInstance is created with version+1 and parentInstanceId pointing
   // to the previous completed instance. The old instance stays intact.
   version: { type: Number, default: 1 },
-  parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance', default: null }
+  parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance', default: null },
+  reopenNote: { type: String },      // reason for reopening (set on the old instance)
+  reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { timestamps: true });
 
 module.exports = mongoose.model('TestInstance', testInstanceSchema);

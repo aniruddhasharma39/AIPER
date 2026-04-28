@@ -9,13 +9,23 @@ const jobSchema = new mongoose.Schema({
       required: { type: Boolean, default: false },
       volume: { type: Number },
       assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' }
+      status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
+      reopenInfo: {
+        parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance' },
+        parentVersion: { type: Number },
+        note: { type: String }
+      }
     },
     macro: {
       required: { type: Boolean, default: false },
       volume: { type: Number },
       assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' }
+      status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
+      reopenInfo: {
+        parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance' },
+        parentVersion: { type: Number },
+        note: { type: String }
+      }
     }
   },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }

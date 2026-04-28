@@ -42,11 +42,11 @@ router.get('/instances', protect, async (req, res) => {
     let query = {};
 
     if (req.user.role === 'HEAD') {
-      // HEAD sees: instances they created (PENDING, PENDING_HEAD_REVIEW)
-      query = { createdBy: req.user._id };
+      // HEAD sees: instances they created, excluding REOPENED
+      query = { createdBy: req.user._id, status: { $ne: 'REOPENED' } };
     } else if (req.user.role === 'LAB_HEAD') {
-      // LAB_HEAD sees: all instances awaiting their review
-      query = { status: 'PENDING_LAB_HEAD_REVIEW' };
+      // LAB_HEAD sees all instances (Review Queue filters client-side for PENDING_LAB_HEAD_REVIEW)
+      query = {};
     } else if (req.user.role === 'ASSISTANT') {
       // ASSISTANT sees: only their PENDING tasks
       query = { assignedTo: req.user._id, status: 'PENDING' };
@@ -96,6 +96,8 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
       referenceRange: p.referenceRange
     }));
 
+    const dept = req.user.department ? req.user.department.toLowerCase() : 'micro';
+
     const instance = await TestInstance.create({
       jobId,
       blueprintId,
@@ -104,13 +106,18 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
       deadline,
       assignedTo,
       results: initialResults,
-      createdBy: req.user._id
+      createdBy: req.user._id,
+      // Link to parent instance if this is a reopened job
+      ...(job.distribution[dept]?.reopenInfo?.parentInstanceId ? {
+        version: (job.distribution[dept].reopenInfo.parentVersion || 0) + 1,
+        parentInstanceId: job.distribution[dept].reopenInfo.parentInstanceId
+      } : {})
     });
 
-    // Update job distribution status to ASSIGNED_TO_ASSISTANT
-    const dept = req.user.department ? req.user.department.toLowerCase() : 'micro';
+    // Update job distribution status to ASSIGNED_TO_ASSISTANT and clear reopenInfo
     if (job.distribution && job.distribution[dept]) {
       job.distribution[dept].status = 'ASSIGNED_TO_ASSISTANT';
+      job.distribution[dept].reopenInfo = undefined;
       await job.save();
     }
 
@@ -235,6 +242,96 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
     res.json(instance);
   } catch (err) {
     res.status(500).json({ message: 'Error processing lab review', error: err.message });
+  }
+});
+
+// LAB_HEAD reopens a completed instance
+router.post('/instances/:id/reopen', protect, authorize('LAB_HEAD'), async (req, res) => {
+  try {
+    const { reopenNote, assignedHeadId } = req.body;
+    if (!reopenNote) return res.status(400).json({ message: 'Reopen note is required' });
+
+    const instance = await TestInstance.findById(req.params.id);
+    if (!instance) return res.status(404).json({ message: 'Instance not found' });
+    if (instance.status !== 'COMPLETED') {
+      return res.status(400).json({ message: 'Only completed instances can be reopened' });
+    }
+
+    // Mark old instance as REOPENED
+    instance.status = 'REOPENED';
+    instance.reopenNote = reopenNote;
+    instance.reopenedBy = req.user._id;
+    await instance.save();
+
+    // Reset Job distribution status to PENDING and store reopenInfo
+    const job = await Job.findById(instance.jobId);
+    if (job) {
+      // Determine which department this instance belongs to
+      const dept = ['micro', 'macro'].find(d => {
+        return job.distribution[d]?.required &&
+          String(job.distribution[d]?.assignedTo) === String(instance.createdBy);
+      });
+
+      if (dept) {
+        job.distribution[dept].status = 'PENDING';
+        job.distribution[dept].reopenInfo = {
+          parentInstanceId: instance._id,
+          parentVersion: instance.version,
+          note: reopenNote
+        };
+        // Optionally change the assigned HEAD
+        if (assignedHeadId) {
+          job.distribution[dept].assignedTo = assignedHeadId;
+        }
+        await job.save();
+      }
+    }
+
+    res.json({ message: 'Job reopened successfully', reopenedInstance: instance });
+  } catch (err) {
+    res.status(500).json({ message: 'Error reopening instance', error: err.message });
+  }
+});
+
+// Get version history for an instance (walk the parentInstanceId chain)
+router.get('/instances/:id/history', protect, async (req, res) => {
+  try {
+    const versions = [];
+    let currentId = req.params.id;
+
+    // Start from the requested instance and walk backwards
+    while (currentId) {
+      const inst = await TestInstance.findById(currentId)
+        .populate('blueprintId', 'name')
+        .populate('assignedTo', 'name')
+        .populate('createdBy', 'name department')
+        .populate('reviewHistory.by', 'name')
+        .populate('reopenedBy', 'name');
+      if (!inst) break;
+      versions.push(inst);
+      currentId = inst.parentInstanceId;
+    }
+
+    // Also check if there are newer versions pointing to this instance
+    let newerVersionId = req.params.id;
+    while (true) {
+      const newer = await TestInstance.findOne({ parentInstanceId: newerVersionId })
+        .populate('blueprintId', 'name')
+        .populate('assignedTo', 'name')
+        .populate('createdBy', 'name department')
+        .populate('reviewHistory.by', 'name')
+        .populate('reopenedBy', 'name');
+      if (!newer) break;
+      versions.unshift(newer); // Add newer versions at the front
+      newerVersionId = newer._id;
+    }
+
+    // Sort by version descending (newest first)
+    versions.sort((a, b) => b.version - a.version);
+
+    res.json(versions);
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching version history', error: err.message });
   }
 });
 

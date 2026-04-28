@@ -702,10 +702,30 @@ function Audit() {
 
   const fetchData = async () => {
     try {
-      const resInst = await axios.get('http://localhost:5000/api/tests/instances');
-      setInstances(resInst.data.filter(i => i.status === 'COMPLETED'));
-      const resJobs = await axios.get('http://localhost:5000/api/jobs');
-      setJobs(resJobs.data);
+      const [resInst, resJobs] = await Promise.all([
+        axios.get('http://localhost:5000/api/tests/instances'),
+        axios.get('http://localhost:5000/api/jobs')
+      ]);
+
+      const allInstances = resInst.data;
+      const allJobs = resJobs.data;
+
+      const isJobFullyCompleted = (job) => {
+        const microOk = !job.distribution?.micro?.required || job.distribution.micro.status === 'COMPLETED';
+        const macroOk = !job.distribution?.macro?.required || job.distribution.macro.status === 'COMPLETED';
+        return microOk && macroOk;
+      };
+
+      const fullyCompletedJobIds = new Set(
+        allJobs.filter(j => isJobFullyCompleted(j)).map(j => j._id)
+      );
+
+      setInstances(
+        allInstances.filter(i =>
+          i.status === 'COMPLETED' && fullyCompletedJobIds.has(i.jobId)
+        )
+      );
+      setJobs(allJobs);
     } catch (err) {
       console.error(err);
     }

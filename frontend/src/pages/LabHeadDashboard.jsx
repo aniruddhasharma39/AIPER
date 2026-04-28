@@ -638,19 +638,88 @@ function Audit() {
   const [instances, setInstances] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
+  const [reopenTarget, setReopenTarget] = useState(null);
+  const [reopenNote, setReopenNote] = useState('');
+  const [reopenHeadId, setReopenHeadId] = useState('');
+  const [heads, setHeads] = useState([]);
+  const [success, setSuccess] = useState('');
+  const [historyTarget, setHistoryTarget] = useState(null);
+  const [versionHistory, setVersionHistory] = useState([]);
 
   const fetchData = async () => {
     try {
-      const resInst = await axios.get('http://localhost:5000/api/tests/instances');
-      setInstances(resInst.data.filter(i => i.status === 'COMPLETED'));
-      const resJobs = await axios.get('http://localhost:5000/api/jobs');
-      setJobs(resJobs.data);
+      const [resInst, resJobs, resUsers] = await Promise.all([
+        axios.get('http://localhost:5000/api/tests/instances'),
+        axios.get('http://localhost:5000/api/jobs'),
+        axios.get('http://localhost:5000/api/users')
+      ]);
+
+      const allInstances = resInst.data;
+      const allJobs = resJobs.data;
+
+      // Helper: check if a pipeline has ever been completed (current COMPLETED or was REOPENED)
+      const isJobAuditReady = (job) => {
+        const jobInsts = allInstances.filter(i => i.jobId === job._id);
+
+        const microOk = !job.distribution?.micro?.required ||
+          job.distribution.micro.status === 'COMPLETED' ||
+          jobInsts.some(i => (i.status === 'COMPLETED' || i.status === 'REOPENED') && i.createdBy?.department?.toUpperCase() === 'MICRO');
+
+        const macroOk = !job.distribution?.macro?.required ||
+          job.distribution.macro.status === 'COMPLETED' ||
+          jobInsts.some(i => (i.status === 'COMPLETED' || i.status === 'REOPENED') && i.createdBy?.department?.toUpperCase() === 'MACRO');
+
+        return microOk && macroOk;
+      };
+
+      // Build a set of audit-ready job IDs
+      const auditReadyJobIds = new Set(
+        allJobs.filter(j => isJobAuditReady(j)).map(j => j._id)
+      );
+
+      // Show COMPLETED/REOPENED instances from audit-ready jobs
+      setInstances(
+        allInstances.filter(i =>
+          (i.status === 'COMPLETED' || i.status === 'REOPENED') &&
+          auditReadyJobIds.has(i.jobId)
+        )
+      );
+      setJobs(allJobs);
+      setHeads(resUsers.data.filter(u => u.role === 'HEAD'));
     } catch (err) {
       console.error(err);
     }
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const handleReopen = async () => {
+    if (!reopenNote.trim()) return;
+    try {
+      await axios.post(`http://localhost:5000/api/tests/instances/${reopenTarget._id}/reopen`, {
+        reopenNote,
+        assignedHeadId: reopenHeadId || undefined
+      });
+      setSuccess('Job reopened successfully. The HEAD will re-dispatch it.');
+      setReopenTarget(null);
+      setReopenNote('');
+      setReopenHeadId('');
+      fetchData();
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchHistory = async (instanceId) => {
+    try {
+      const res = await axios.get(`http://localhost:5000/api/tests/instances/${instanceId}/history`);
+      setVersionHistory(res.data);
+      setHistoryTarget(instanceId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   if (selectedReport) {
     return <ReportViewer report={selectedReport} onBack={() => setSelectedReport(null)} />;
@@ -665,6 +734,79 @@ function Audit() {
         <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
       </div>
 
+      {success && <div style={{ color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+
+      {/* Reopen Modal */}
+      {reopenTarget && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '2rem' }}>
+            <h2 style={{ marginBottom: '0.5rem' }}>Reopen Job</h2>
+            <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+              Test: <strong>{reopenTarget.testCode}</strong> — {reopenTarget.blueprintId?.name}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reason for Reopening *</label>
+                <textarea
+                  value={reopenNote}
+                  onChange={e => setReopenNote(e.target.value)}
+                  placeholder="e.g. Client requested additional pH testing..."
+                  style={{ width: '100%', minHeight: '80px', padding: '0.75rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', resize: 'vertical', fontFamily: 'inherit' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reassign to HEAD (optional)</label>
+                <select value={reopenHeadId} onChange={e => setReopenHeadId(e.target.value)} style={{ width: '100%' }}>
+                  <option value="">Keep current HEAD</option>
+                  {heads.filter(h => h.department?.toUpperCase() === reopenTarget.createdBy?.department?.toUpperCase()).map(h => <option key={h._id} value={h._id}>{h.name} ({h.department === 'Macro' || h.department === 'macro' ? 'Chemical' : h.department})</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                <button onClick={handleReopen} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }} disabled={!reopenNote.trim()}>
+                  <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reopen Job
+                </button>
+                <button onClick={() => { setReopenTarget(null); setReopenNote(''); setReopenHeadId(''); }} className="btn" style={{ flex: 1, justifyContent: 'center', border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Version History Panel */}
+      {historyTarget && versionHistory.length > 0 && (
+        <div className="card" style={{ borderLeft: '4px solid var(--color-primary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>Version History</h3>
+            <button onClick={() => { setHistoryTarget(null); setVersionHistory([]); }} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem', border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Close</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {versionHistory.map(v => (
+              <div key={v._id} style={{ padding: '1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>v{v.version}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{v.testCode}</span>
+                    <span className={`badge ${v.status === 'COMPLETED' ? 'badge-success' : v.status === 'REOPENED' ? 'badge-warning' : ''}`} style={{ fontSize: '0.7rem' }}>{v.status}</span>
+                  </div>
+                  {v.status === 'COMPLETED' && (
+                    <button onClick={() => setSelectedReport(v)} className="btn btn-primary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}>View PDF</button>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                  Blueprint: {v.blueprintId?.name} · Analyst: {v.assignedTo?.name}
+                  {v.completedAt && ` · Completed: ${new Date(v.completedAt).toLocaleDateString()}`}
+                </div>
+                {v.reopenNote && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--color-warning)', marginTop: '0.3rem', fontStyle: 'italic' }}>
+                    Reopen reason: "{v.reopenNote}"
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           PDF Reports & Completed Audit
@@ -676,24 +818,44 @@ function Audit() {
                 <th>Test Code</th>
                 <th>Client Name</th>
                 <th>Blueprint</th>
-                <th>Analyst</th>
+                <th>Department</th>
+                <th>Status</th>
                 <th>Date Completed</th>
-                <th>Action</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {instances.length === 0 ? (
-                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests yet.</td></tr>
+                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests yet.</td></tr>
               ) : (
                 instances.map(inst => (
-                  <tr key={inst._id}>
+                  <tr key={inst._id} style={{ opacity: inst.status === 'REOPENED' ? 0.6 : 1 }}>
                     <td style={{ fontFamily: 'monospace' }}>{inst.testCode}</td>
                     <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
                     <td>{inst.blueprintId?.name}</td>
-                    <td>{inst.assignedTo?.name}</td>
-                    <td>{new Date(inst.completedAt).toLocaleDateString()}</td>
+                    <td style={{ fontWeight: 500, fontSize: '0.85rem' }}>
+                      {inst.createdBy?.department?.toUpperCase() === 'MACRO' ? 'CHEMICAL' : inst.createdBy?.department?.toUpperCase() || '—'}
+                    </td>
                     <td>
-                      <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
+                      {inst.status === 'COMPLETED' ? (
+                        <span className="badge badge-success">Completed</span>
+                      ) : (
+                        <span className="badge badge-warning">Reopened</span>
+                      )}
+                    </td>
+                    <td>{inst.completedAt ? new Date(inst.completedAt).toLocaleDateString() : '—'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        {inst.status === 'COMPLETED' && (
+                          <>
+                            <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
+                            <button onClick={() => setReopenTarget(inst)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>Reopen</button>
+                          </>
+                        )}
+                        {(inst.version > 1 || inst.status === 'REOPENED') && (
+                          <button onClick={() => fetchHistory(inst._id)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem', border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>History</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

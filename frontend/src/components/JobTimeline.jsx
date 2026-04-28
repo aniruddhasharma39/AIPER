@@ -1,12 +1,23 @@
 import React from 'react';
-import { Circle, User, Calendar, CheckCircle, Clock, ClipboardCheck, AlertTriangle } from 'lucide-react';
+import { Circle, User, Calendar, CheckCircle, Clock, ClipboardCheck, AlertTriangle, History } from 'lucide-react';
 
 export default function JobTimeline({ job }) {
   const instances = job.testInstances || [];
   
-  // Find instances for each department based on the assignedTo id
-  const microInstance = instances.find(i => String(i.createdBy) === String(job.distribution?.micro?.assignedTo?._id));
-  const macroInstance = instances.find(i => String(i.createdBy) === String(job.distribution?.macro?.assignedTo?._id));
+  // Find the best instance per department: prefer the latest active (non-REOPENED) one,
+  // fall back to the most recent REOPENED if no active instance exists.
+  const pickInstance = (deptHeadId) => {
+    const deptInstances = instances.filter(i => String(i.createdBy) === String(deptHeadId));
+    // First try: latest active instance
+    const active = deptInstances.filter(i => i.status !== 'REOPENED').sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    if (active.length > 0) return active[0];
+    // Fallback: latest REOPENED
+    const reopened = deptInstances.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return reopened[0] || null;
+  };
+
+  const microInstance = pickInstance(job.distribution?.micro?.assignedTo?._id);
+  const macroInstance = pickInstance(job.distribution?.macro?.assignedTo?._id);
 
   const formatDate = (d) => new Date(d).toLocaleString();
 
@@ -15,6 +26,7 @@ export default function JobTimeline({ job }) {
       case 'completed': return <CheckCircle color="var(--color-success)" fill="white" size={24} />;
       case 'review': return <ClipboardCheck color="var(--color-primary)" fill="white" size={24} />;
       case 'warning': return <AlertTriangle color="var(--color-warning)" fill="white" size={24} />;
+      case 'reopened': return <History color="var(--color-primary-dark)" fill="white" size={24} />;
       default: return <Clock color="var(--color-text-muted)" fill="white" size={24} />;
     }
   };
@@ -42,6 +54,7 @@ export default function JobTimeline({ job }) {
       case 'COMPLETED': return 'completed';
       case 'PENDING_HEAD_REVIEW': return 'review';
       case 'PENDING_LAB_HEAD_REVIEW': return 'review';
+      case 'REOPENED': return 'reopened';
       default: return 'pending';
     }
   };
@@ -52,6 +65,7 @@ export default function JobTimeline({ job }) {
       case 'PENDING_HEAD_REVIEW': return { text: 'Awaiting HEAD Review', className: 'badge-warning' };
       case 'PENDING_LAB_HEAD_REVIEW': return { text: 'Awaiting Lab Head Review', className: 'badge-primary' };
       case 'COMPLETED': return { text: 'Approved', className: 'badge-success' };
+      case 'REOPENED': return { text: 'Reopened Job', className: 'badge-warning' };
       default: return null;
     }
   };
@@ -63,6 +77,7 @@ export default function JobTimeline({ job }) {
     const isDispatched = instance != null;
     const instStatus = getInstanceStatus(instance);
     const isCompleted = distData.status === 'COMPLETED' || instance?.status === 'COMPLETED';
+    const isReopened = instance?.status === 'REOPENED';
     const isInReview = instance?.status === 'PENDING_HEAD_REVIEW' || instance?.status === 'PENDING_LAB_HEAD_REVIEW';
     const hasBeenReassigned = instance?.reviewHistory?.some(rh => rh.action === 'REASSIGN');
 
@@ -98,12 +113,12 @@ export default function JobTimeline({ job }) {
           badge={getInstanceBadge(instance)}
         />
 
-        {/* Step 4: Final Approval (only show if in review or completed) */}
-        {(isInReview || isCompleted) && (
+        {/* Step 4: Final Approval (only show if in review, completed, or reopened) */}
+        {(isInReview || isCompleted || isReopened) && (
           <Step 
-            title={isCompleted ? "Report Generated" : "Final Approval Pending"} 
-            date={isCompleted ? instance?.completedAt : null} 
-            status={isCompleted ? 'completed' : 'pending'}
+            title={isCompleted ? "Report Generated" : isReopened ? "Report Archived (Job Reopened)" : "Final Approval Pending"} 
+            date={isCompleted || isReopened ? instance?.completedAt : null} 
+            status={isCompleted ? 'completed' : isReopened ? 'reopened' : 'pending'}
             isLast={true}
           />
         )}
