@@ -212,7 +212,7 @@ function CollapsibleSection({ title, count, isOpen, onToggle, children }) {
   );
 }
 
-function Users() {
+function UsersPage() {
   const [users, setUsers] = useState([]);
   const [expanded, setExpanded] = useState({
     management: true,
@@ -420,7 +420,7 @@ export default function AdminDashboard() {
   return (
     <Routes>
       <Route path="/" element={<Dashboard />} />
-      <Route path="/users" element={<Users />} />
+      <Route path="/users" element={<UsersPage />} />
       <Route path="/audit" element={<Audit />} />
     </Routes>
   );

@@ -206,7 +206,7 @@ function UserSection({ title, users, onEdit, onDelete, userToDelete, setUserToDe
   );
 }
 
-function Users() {
+function UsersPage() {
   const [users, setUsers] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editUserId, setEditUserId] = useState(null);
@@ -712,7 +712,7 @@ export default function LabHeadDashboard() {
       <Route path="/" element={<Dashboard />} />
       <Route path="/jobs" element={<Jobs />} />
       <Route path="/blueprints" element={<Blueprints />} />
-      <Route path="/users" element={<Users />} />
+      <Route path="/users" element={<UsersPage />} />
       <Route path="/audit" element={<Audit />} />
     </Routes>
   );
