@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
 import ReportViewer from '../components/ReportViewer';
 import { AuthContext } from '../context/AuthContext';
@@ -312,7 +312,7 @@ function UsersPage() {
                 <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Department</label>
                 <select value={formData.department} onChange={e => setFormData({...formData, department: e.target.value})} required>
                   <option value="Micro">Micro</option>
-                  <option value="Macro">Macro</option>
+                  <option value="Macro">Chemical</option>
                 </select>
               </div>
             </div>
@@ -504,20 +504,20 @@ function Jobs() {
                 )}
               </div>
 
-              {/* MACRO SECTION */}
+              {/* CHEMICAL SECTION */}
               <div 
                 className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`}
                 onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))}
                 style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
               >
                 <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to MACRO</span>
+                  <span>Distribute to CHEMICAL</span>
                   {formData.macroRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
                 </div>
                 {formData.macroRequired && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Macro Volume</label>
+                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Chemical Volume</label>
                       <input type="number" step="0.01" value={formData.macroVolume} onChange={e => handleMacroChange(e.target.value)} required />
                     </div>
                     <div>
@@ -589,7 +589,7 @@ function Blueprints() {
               <input style={{ flex: 2 }} type="text" placeholder="Blueprint Name (e.g. Complete Blood Count)" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} required />
               <select style={{ flex: 1 }} value={formData.department} onChange={e => setFormData(p => ({ ...p, department: e.target.value }))}>
                 <option value="Micro">Micro</option>
-                <option value="Macro">Macro</option>
+                <option value="Macro">Chemical</option>
               </select>
             </div>
             <h4>Parameters</h4>
@@ -706,10 +706,165 @@ function Audit() {
   );
 }
 
+function LabReviewQueue() {
+  const [instances, setInstances] = useState([]);
+  const [selectedInstance, setSelectedInstance] = useState(null);
+  const [reassignNote, setReassignNote] = useState('');
+  const [showReassignForm, setShowReassignForm] = useState(null);
+  const [success, setSuccess] = useState('');
+
+  const fetchReviewItems = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/tests/instances');
+      setInstances(res.data.filter(i => i.status === 'PENDING_LAB_HEAD_REVIEW'));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchReviewItems(); }, []);
+
+  const handleApprove = async (id) => {
+    try {
+      await axios.put(`http://localhost:5000/api/tests/instances/${id}/lab-review`, { action: 'APPROVE' });
+      setSuccess('Approved! Report has been generated and job marked as completed.');
+      fetchReviewItems();
+      setSelectedInstance(null);
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleReassign = async (id) => {
+    try {
+      await axios.put(`http://localhost:5000/api/tests/instances/${id}/lab-review`, {
+        action: 'REASSIGN',
+        note: reassignNote
+      });
+      setSuccess('Sent back to analyst for correction.');
+      setReassignNote('');
+      setShowReassignForm(null);
+      fetchReviewItems();
+      setSelectedInstance(null);
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div>
+      <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <ClipboardCheck size={28} style={{ color: 'var(--color-primary)' }} /> Final Review Queue
+      </h1>
+      <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>These submissions have been approved by the Department Head. Review and approve to generate the final report.</p>
+
+      {success && <div style={{ marginBottom: '1.5rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+
+      {instances.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+          No submissions awaiting your final review.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {instances.map(inst => (
+            <div key={inst._id} className="card" style={{ borderLeft: '4px solid var(--color-primary)', padding: 0, overflow: 'hidden' }}>
+              {/* Header */}
+              <div style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', cursor: 'pointer', backgroundColor: selectedInstance === inst._id ? 'var(--color-surface-hover)' : 'transparent' }}
+                onClick={() => setSelectedInstance(selectedInstance === inst._id ? null : inst._id)}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{inst.blueprintId?.name}</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
+                    Code: <span style={{ fontFamily: 'monospace' }}>{inst.testCode}</span> · Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
+                  </div>
+                </div>
+                <span className="badge badge-primary">HEAD Approved — Awaiting Final Review</span>
+              </div>
+
+              {/* Expanded detail */}
+              {selectedInstance === inst._id && (
+                <div style={{ padding: '1.5rem' }}>
+                  {/* Review history */}
+                  {inst.reviewHistory && inst.reviewHistory.length > 0 && (
+                    <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'rgba(64, 158, 255, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-primary)' }}>
+                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.85rem', color: 'var(--color-primary)' }}>Review History</div>
+                      {inst.reviewHistory.map((rh, i) => (
+                        <div key={i} style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.3rem' }}>
+                          <strong>{rh.role}</strong> — {rh.action} {rh.note && `("${rh.note}")`} — {new Date(rh.date).toLocaleString()}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Results table */}
+                  <h4 style={{ marginBottom: '0.75rem' }}>Submitted Results</h4>
+                  <table style={{ marginBottom: '1.5rem' }}>
+                    <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+                      <tr>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                        <th>Unit</th>
+                        <th>Reference Range</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inst.results.map(r => (
+                        <tr key={r.parameterId}>
+                          <td style={{ fontWeight: 500 }}>{r.name}</td>
+                          <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{r.value || '—'}</td>
+                          <td>{r.unit}</td>
+                          <td style={{ color: 'var(--color-text-muted)' }}>{r.referenceRange}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Actions */}
+                  {showReassignForm === inst._id ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div>
+                        <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reason for Reassignment</label>
+                        <textarea
+                          value={reassignNote}
+                          onChange={e => setReassignNote(e.target.value)}
+                          placeholder="Describe what needs to be corrected..."
+                          style={{ width: '100%', minHeight: '80px', padding: '0.75rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', resize: 'vertical', fontFamily: 'inherit' }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '1rem' }}>
+                        <button onClick={() => handleReassign(inst._id)} className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white', border: 'none' }}>
+                          <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Confirm Reassignment
+                        </button>
+                        <button onClick={() => { setShowReassignForm(null); setReassignNote(''); }} className="btn" style={{ border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '1rem' }}>
+                      <button onClick={() => handleApprove(inst._id)} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
+                        <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Generate Report
+                      </button>
+                      <button onClick={() => setShowReassignForm(inst._id)} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
+                        <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign to Analyst
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LabHeadDashboard() {
   return (
     <Routes>
       <Route path="/" element={<Dashboard />} />
+      <Route path="/review" element={<LabReviewQueue />} />
       <Route path="/jobs" element={<Jobs />} />
       <Route path="/blueprints" element={<Blueprints />} />
       <Route path="/users" element={<UsersPage />} />

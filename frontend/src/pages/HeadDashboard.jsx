@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle } from 'lucide-react';
+import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle, ClipboardCheck, RotateCcw } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import ReportViewer from '../components/ReportViewer';
@@ -528,6 +528,160 @@ function Dispatcher() {
   );
 }
 
+function ReviewQueue() {
+  const [instances, setInstances] = useState([]);
+  const [selectedInstance, setSelectedInstance] = useState(null);
+  const [reassignNote, setReassignNote] = useState('');
+  const [showReassignForm, setShowReassignForm] = useState(null);
+  const [success, setSuccess] = useState('');
+
+  const fetchReviewItems = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/tests/instances');
+      setInstances(res.data.filter(i => i.status === 'PENDING_HEAD_REVIEW'));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchReviewItems(); }, []);
+
+  const handleApprove = async (id) => {
+    try {
+      await axios.put(`http://localhost:5000/api/tests/instances/${id}/review`, { action: 'APPROVE' });
+      setSuccess('Approved and forwarded to Lab Head for final review.');
+      fetchReviewItems();
+      setSelectedInstance(null);
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleReassign = async (id) => {
+    try {
+      await axios.put(`http://localhost:5000/api/tests/instances/${id}/review`, {
+        action: 'REASSIGN',
+        note: reassignNote
+      });
+      setSuccess('Sent back to analyst for correction.');
+      setReassignNote('');
+      setShowReassignForm(null);
+      fetchReviewItems();
+      setSelectedInstance(null);
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div>
+      <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <ClipboardCheck size={28} style={{ color: 'var(--color-primary)' }} /> Review Queue
+      </h1>
+      <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>Review analyst submissions before forwarding to Lab Head.</p>
+
+      {success && <div style={{ marginBottom: '1.5rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+
+      {instances.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+          No submissions awaiting your review.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {instances.map(inst => (
+            <div key={inst._id} className="card" style={{ borderLeft: '4px solid var(--color-warning)', padding: 0, overflow: 'hidden' }}>
+              {/* Header */}
+              <div style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', cursor: 'pointer', backgroundColor: selectedInstance === inst._id ? 'var(--color-surface-hover)' : 'transparent' }}
+                onClick={() => setSelectedInstance(selectedInstance === inst._id ? null : inst._id)}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{inst.blueprintId?.name}</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
+                    Code: <span style={{ fontFamily: 'monospace' }}>{inst.testCode}</span> · Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
+                  </div>
+                </div>
+                <span className="badge badge-warning">Awaiting Review</span>
+              </div>
+
+              {/* Expanded detail */}
+              {selectedInstance === inst._id && (
+                <div style={{ padding: '1.5rem' }}>
+                  {/* Review history */}
+                  {inst.reviewHistory && inst.reviewHistory.length > 0 && (
+                    <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'rgba(241, 196, 15, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-warning)' }}>
+                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.85rem', color: 'var(--color-warning)' }}>Previous Review History</div>
+                      {inst.reviewHistory.map((rh, i) => (
+                        <div key={i} style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.3rem' }}>
+                          <strong>{rh.role}</strong> — {rh.action} {rh.note && `("${rh.note}")`} — {new Date(rh.date).toLocaleString()}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Results table */}
+                  <h4 style={{ marginBottom: '0.75rem' }}>Submitted Results</h4>
+                  <table style={{ marginBottom: '1.5rem' }}>
+                    <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
+                      <tr>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                        <th>Unit</th>
+                        <th>Reference Range</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inst.results.map(r => (
+                        <tr key={r.parameterId}>
+                          <td style={{ fontWeight: 500 }}>{r.name}</td>
+                          <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{r.value || '—'}</td>
+                          <td>{r.unit}</td>
+                          <td style={{ color: 'var(--color-text-muted)' }}>{r.referenceRange}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Actions */}
+                  {showReassignForm === inst._id ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div>
+                        <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reason for Reassignment</label>
+                        <textarea
+                          value={reassignNote}
+                          onChange={e => setReassignNote(e.target.value)}
+                          placeholder="Describe what needs to be corrected..."
+                          style={{ width: '100%', minHeight: '80px', padding: '0.75rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', resize: 'vertical', fontFamily: 'inherit' }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '1rem' }}>
+                        <button onClick={() => handleReassign(inst._id)} className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white', border: 'none' }}>
+                          <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Confirm Reassignment
+                        </button>
+                        <button onClick={() => { setShowReassignForm(null); setReassignNote(''); }} className="btn" style={{ border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '1rem' }}>
+                      <button onClick={() => handleApprove(inst._id)} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
+                        <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Forward to Lab Head
+                      </button>
+                      <button onClick={() => setShowReassignForm(inst._id)} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
+                        <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign to Analyst
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HeadDashboard() {
   return (
     <Routes>
@@ -535,6 +689,7 @@ export default function HeadDashboard() {
       <Route path="/assistants" element={<Assistants />} />
       <Route path="/blueprints" element={<Blueprints />} />
       <Route path="/dispatcher" element={<Dispatcher />} />
+      <Route path="/review" element={<ReviewQueue />} />
       <Route path="/audit" element={<Audit />} />
     </Routes>
   );

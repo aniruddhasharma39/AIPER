@@ -1,5 +1,5 @@
 import React from 'react';
-import { Circle, User, Calendar, CheckCircle, Clock } from 'lucide-react';
+import { Circle, User, Calendar, CheckCircle, Clock, ClipboardCheck, AlertTriangle } from 'lucide-react';
 
 export default function JobTimeline({ job }) {
   const instances = job.testInstances || [];
@@ -10,27 +10,61 @@ export default function JobTimeline({ job }) {
 
   const formatDate = (d) => new Date(d).toLocaleString();
 
-  const Step = ({ title, user, date, completed, isLast }) => (
+  const StatusIcon = ({ status }) => {
+    switch (status) {
+      case 'completed': return <CheckCircle color="var(--color-success)" fill="white" size={24} />;
+      case 'review': return <ClipboardCheck color="var(--color-primary)" fill="white" size={24} />;
+      case 'warning': return <AlertTriangle color="var(--color-warning)" fill="white" size={24} />;
+      default: return <Clock color="var(--color-text-muted)" fill="white" size={24} />;
+    }
+  };
+
+  const Step = ({ title, user, date, status = 'pending', isLast, badge }) => (
     <div style={{ display: 'flex', gap: '1rem', position: 'relative', paddingBottom: isLast ? '0' : '2rem' }}>
-      {!isLast && <div style={{ position: 'absolute', top: '24px', left: '11px', bottom: '0', width: '2px', backgroundColor: completed ? 'var(--color-success)' : 'var(--color-border)' }} />}
+      {!isLast && <div style={{ position: 'absolute', top: '24px', left: '11px', bottom: '0', width: '2px', backgroundColor: status === 'completed' ? 'var(--color-success)' : 'var(--color-border)' }} />}
       <div style={{ zIndex: 1 }}>
-        {completed ? <CheckCircle color="var(--color-success)" fill="white" size={24} /> : <Clock color="var(--color-warning)" fill="white" size={24} />}
+        <StatusIcon status={status} />
       </div>
       <div>
-        <h4 style={{ margin: '0 0 0.25rem 0', color: completed ? 'var(--color-text-main)' : 'var(--color-text-muted)' }}>{title}</h4>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h4 style={{ margin: '0 0 0.25rem 0', color: status !== 'pending' ? 'var(--color-text-main)' : 'var(--color-text-muted)' }}>{title}</h4>
+          {badge && <span className={`badge ${badge.className}`} style={{ fontSize: '0.7rem', ...badge.style }}>{badge.text}</span>}
+        </div>
         {user && <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '0.2rem' }}><User size={14}/> {user}</div>}
         {date && <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}><Calendar size={14}/> {formatDate(date)}</div>}
       </div>
     </div>
   );
 
+  const getInstanceStatus = (instance) => {
+    if (!instance) return null;
+    switch (instance.status) {
+      case 'COMPLETED': return 'completed';
+      case 'PENDING_HEAD_REVIEW': return 'review';
+      case 'PENDING_LAB_HEAD_REVIEW': return 'review';
+      default: return 'pending';
+    }
+  };
+
+  const getInstanceBadge = (instance) => {
+    if (!instance) return null;
+    switch (instance.status) {
+      case 'PENDING_HEAD_REVIEW': return { text: 'Awaiting HEAD Review', className: 'badge-warning' };
+      case 'PENDING_LAB_HEAD_REVIEW': return { text: 'Awaiting Lab Head Review', className: 'badge-primary' };
+      case 'COMPLETED': return { text: 'Approved', className: 'badge-success' };
+      default: return null;
+    }
+  };
+
   const DepartmentBranch = ({ deptName, distData, instance }) => {
     if (!distData?.required) return null;
     
-    // Determine milestone state
     const isAssignedToHead = distData.assignedTo != null;
     const isDispatched = instance != null;
+    const instStatus = getInstanceStatus(instance);
     const isCompleted = distData.status === 'COMPLETED' || instance?.status === 'COMPLETED';
+    const isInReview = instance?.status === 'PENDING_HEAD_REVIEW' || instance?.status === 'PENDING_LAB_HEAD_REVIEW';
+    const hasBeenReassigned = instance?.reviewHistory?.some(rh => rh.action === 'REASSIGN');
 
     return (
       <div style={{ flex: 1, borderTop: '2px solid var(--color-border)', paddingTop: '1.5rem' }}>
@@ -41,7 +75,7 @@ export default function JobTimeline({ job }) {
           title={`Forwarded to ${deptName} Head`} 
           user={distData.assignedTo?.name || 'Unassigned'} 
           date={job.createdAt} 
-          completed={isAssignedToHead}
+          status={isAssignedToHead ? 'completed' : 'pending'}
           isLast={false}
         />
         
@@ -50,18 +84,29 @@ export default function JobTimeline({ job }) {
           title={isDispatched ? "Dispatched to Assistant" : "Dispatch Pending"} 
           user={instance?.assignedTo?.name || 'Waiting for Dispatch'} 
           date={instance?.createdAt} 
-          completed={isDispatched}
+          status={isDispatched ? 'completed' : 'pending'}
           isLast={false}
         />
 
-        {/* Step 3: Analysis Completed */}
+        {/* Step 3: Analysis Submitted / In Review */}
         <Step 
-          title={isCompleted ? "Analysis Completed" : "Analysis Pending"} 
+          title={isCompleted ? "Analysis Approved" : isInReview ? "Submitted — Under Review" : hasBeenReassigned ? "Reassigned for Correction" : "Analysis Pending"} 
           user={instance?.assignedTo?.name || (isDispatched ? 'Pending Analysis' : 'Waiting for Dispatch')} 
-          date={instance?.completedAt} 
-          completed={isCompleted}
-          isLast={true}
+          date={instance?.completedAt || (isInReview ? instance?.updatedAt : null)} 
+          status={isCompleted ? 'completed' : isInReview ? 'review' : hasBeenReassigned ? 'warning' : 'pending'}
+          isLast={!isInReview && !isCompleted}
+          badge={getInstanceBadge(instance)}
         />
+
+        {/* Step 4: Final Approval (only show if in review or completed) */}
+        {(isInReview || isCompleted) && (
+          <Step 
+            title={isCompleted ? "Report Generated" : "Final Approval Pending"} 
+            date={isCompleted ? instance?.completedAt : null} 
+            status={isCompleted ? 'completed' : 'pending'}
+            isLast={true}
+          />
+        )}
       </div>
     );
   };
@@ -75,14 +120,14 @@ export default function JobTimeline({ job }) {
         title="Job Sample Logged" 
         user={job.createdBy?.name || 'Admin/Lab Head'} 
         date={job.createdAt} 
-        completed={true}
+        status="completed"
         isLast={!job.distribution?.micro?.required && !job.distribution?.macro?.required}
       />
       
       {/* Branching */}
       <div style={{ display: 'flex', gap: '2rem', marginTop: '1.5rem', paddingLeft: '2rem' }}>
         <DepartmentBranch deptName="MICRO" distData={job.distribution?.micro} instance={microInstance} />
-        <DepartmentBranch deptName="MACRO" distData={job.distribution?.macro} instance={macroInstance} />
+        <DepartmentBranch deptName="CHEMICAL" distData={job.distribution?.macro} instance={macroInstance} />
       </div>
     </div>
   );

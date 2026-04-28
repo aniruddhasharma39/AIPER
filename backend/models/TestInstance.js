@@ -8,6 +8,14 @@ const resultParameterSchema = new mongoose.Schema({
   referenceRange: { type: String }
 });
 
+const reviewEntrySchema = new mongoose.Schema({
+  action: { type: String, enum: ['APPROVE', 'REASSIGN'], required: true },
+  by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  role: { type: String }, // 'HEAD' or 'LAB_HEAD'
+  note: { type: String },
+  date: { type: Date, default: Date.now }
+});
+
 const testInstanceSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' }, // Link to Lab Head created Job
   blueprintId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestBlueprint', required: true },
@@ -15,10 +23,22 @@ const testInstanceSchema = new mongoose.Schema({
   clientName: { type: String },
   deadline: { type: Date, required: true },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  status: { type: String, enum: ['PENDING', 'COMPLETED'], default: 'PENDING' },
+  status: {
+    type: String,
+    enum: ['PENDING', 'PENDING_HEAD_REVIEW', 'PENDING_LAB_HEAD_REVIEW', 'COMPLETED'],
+    default: 'PENDING'
+  },
   results: [resultParameterSchema],
+  previousResults: [resultParameterSchema], // snapshot of last submission for reference on reassignment
+  reviewHistory: [reviewEntrySchema],        // full audit trail of approvals/rejections
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  completedAt: { type: Date }
+  completedAt: { type: Date },
+
+  // Future-proofing for job reopening: when a completed job is reopened,
+  // a new TestInstance is created with version+1 and parentInstanceId pointing
+  // to the previous completed instance. The old instance stays intact.
+  version: { type: Number, default: 1 },
+  parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance', default: null }
 }, { timestamps: true });
 
 module.exports = mongoose.model('TestInstance', testInstanceSchema);

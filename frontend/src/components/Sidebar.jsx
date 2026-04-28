@@ -1,7 +1,7 @@
 import React, { useContext } from 'react';
 import { NavLink } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import { Activity, Users, FileText, LayoutDashboard, Settings } from 'lucide-react';
+import { Activity, Users, FileText, LayoutDashboard, Settings, ClipboardCheck } from 'lucide-react';
 
 export default function Sidebar() {
   const { user } = useContext(AuthContext);
@@ -12,20 +12,25 @@ export default function Sidebar() {
         return [
           { to: '/admin', icon: <LayoutDashboard size={20} />, label: 'Super Admin Tracker' },
           { to: '/admin/users', icon: <Users size={20} />, label: 'Staff Directory' },
+          { to: '/admin/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
         ];
       case 'LAB_HEAD':
         return [
           { to: '/lab-head', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
+          { to: '/lab-head/review', icon: <ClipboardCheck size={20} />, label: 'Review Queue' },
           { to: '/lab-head/jobs', icon: <Activity size={20} />, label: 'Job Distributor' },
           { to: '/lab-head/blueprints', icon: <Settings size={20} />, label: 'Test Blueprints' },
           { to: '/lab-head/users', icon: <Users size={20} />, label: 'User Management' },
+          { to: '/lab-head/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
         ];
       case 'HEAD':
         return [
           { to: '/head', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
+          { to: '/head/review', icon: <ClipboardCheck size={20} />, label: 'Review Queue' },
           { to: '/head/assistants', icon: <Users size={20} />, label: 'Assistants' },
           { to: '/head/blueprints', icon: <Settings size={20} />, label: 'Test Blueprints' },
           { to: '/head/dispatcher', icon: <Activity size={20} />, label: 'Job Dispatcher' },
+          { to: '/head/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
         ];
       case 'ASSISTANT':
         return [
