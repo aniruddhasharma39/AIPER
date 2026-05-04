@@ -5,6 +5,7 @@ const TestInstance = require('../models/TestInstance');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
+const { createNotification, notifyLabHeads } = require('../utils/notifier');
 
 // --- BLUEPRINTS ---
 
@@ -121,6 +122,24 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
       await job.save();
     }
 
+    // Notify Assistant
+    await createNotification({
+      recipient: assignedTo,
+      type: 'ACTION_REQUIRED',
+      title: 'New Test Assigned',
+      message: `You have been assigned to test ${testCode} for ${job.clientName}.`,
+      relatedJobId: jobId,
+      relatedInstanceId: instance._id
+    });
+
+    // Notify Lab Heads
+    await notifyLabHeads({
+      type: 'INFO',
+      title: 'Job Dispatched',
+      message: `${dept.toUpperCase()} HEAD has dispatched test ${testCode} to an analyst.`,
+      relatedJobId: jobId
+    });
+
     res.status(201).json(instance);
   } catch (err) {
     res.status(500).json({ message: 'Error creating instance', error: err.message });
@@ -143,6 +162,17 @@ router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req
     instance.previousResults = [];
 
     await instance.save();
+
+    // Notify HEAD for review
+    await createNotification({
+      recipient: instance.createdBy,
+      type: 'ACTION_REQUIRED',
+      title: 'Review Required',
+      message: `Analyst has submitted results for test ${instance.testCode}. Pending your review.`,
+      relatedJobId: instance.jobId,
+      relatedInstanceId: instance._id,
+      link: '/review'
+    });
 
     res.json(instance);
   } catch (err) {
@@ -185,6 +215,34 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
     }
 
     await instance.save();
+
+    if (action === 'APPROVE') {
+      await notifyLabHeads({
+        type: 'ACTION_REQUIRED',
+        title: 'Final Review Required',
+        message: `HEAD has approved test ${instance.testCode}. Pending your final review.`,
+        relatedJobId: instance.jobId,
+        relatedInstanceId: instance._id,
+        link: '/review'
+      });
+    } else {
+      await createNotification({
+        recipient: instance.assignedTo,
+        type: 'WARNING',
+        title: 'Job Reassigned',
+        message: `Your results for test ${instance.testCode} were rejected by HEAD. Please revise.`,
+        relatedJobId: instance.jobId,
+        relatedInstanceId: instance._id
+      });
+
+      await notifyLabHeads({
+        type: 'INFO',
+        title: 'Job Reassigned by HEAD',
+        message: `HEAD rejected results for test ${instance.testCode} and sent it back to the analyst.`,
+        relatedJobId: instance.jobId,
+        relatedInstanceId: instance._id
+      });
+    }
     res.json(instance);
   } catch (err) {
     res.status(500).json({ message: 'Error processing review', error: err.message });
@@ -239,6 +297,34 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
     }
 
     await instance.save();
+
+    if (action === 'APPROVE') {
+      await notifyLabHeads({
+        type: 'SUCCESS',
+        title: 'Job Completed',
+        message: `Test ${instance.testCode} has been approved and completed. Report generated.`,
+        relatedJobId: instance.jobId,
+        relatedInstanceId: instance._id,
+        link: '/audit'
+      });
+      await notifyAdmins({
+        type: 'SUCCESS',
+        title: 'Job Completed',
+        message: `Test ${instance.testCode} has been finalized.`,
+        relatedJobId: instance.jobId,
+        relatedInstanceId: instance._id
+      });
+    } else {
+      await createNotification({
+        recipient: instance.assignedTo,
+        type: 'WARNING',
+        title: 'Job Reassigned',
+        message: `Your results for test ${instance.testCode} were rejected by LAB_HEAD. Please revise.`,
+        relatedJobId: instance.jobId,
+        relatedInstanceId: instance._id
+      });
+    }
+
     res.json(instance);
   } catch (err) {
     res.status(500).json({ message: 'Error processing lab review', error: err.message });

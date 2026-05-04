@@ -4,6 +4,7 @@ const Job = require('../models/Job');
 const TestInstance = require('../models/TestInstance');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
+const { createNotification, notifyAdmins, notifyLabHeads } = require('../utils/notifier');
 
 // Get all jobs based on role
 router.get('/', protect, async (req, res) => {
@@ -52,6 +53,35 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
       distribution,
       createdBy: req.user._id
     });
+
+    // Notify Admins
+    await notifyAdmins({
+      type: 'INFO',
+      title: 'New Job Logged',
+      message: `Job ${jobCode} for client ${clientName} has been created.`,
+      relatedJobId: job._id
+    });
+
+    // Notify assigned HEADs
+    if (distribution?.micro?.required && distribution.micro.assignedTo) {
+      await createNotification({
+        recipient: distribution.micro.assignedTo,
+        type: 'ACTION_REQUIRED',
+        title: 'New Job Dispatched',
+        message: `Job ${jobCode} requires MICRO department analysis.`,
+        relatedJobId: job._id
+      });
+    }
+    
+    if (distribution?.macro?.required && distribution.macro.assignedTo) {
+      await createNotification({
+        recipient: distribution.macro.assignedTo,
+        type: 'ACTION_REQUIRED',
+        title: 'New Job Dispatched',
+        message: `Job ${jobCode} requires CHEMICAL department analysis.`,
+        relatedJobId: job._id
+      });
+    }
 
     res.status(201).json(job);
   } catch (error) {

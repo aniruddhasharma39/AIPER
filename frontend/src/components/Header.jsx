@@ -1,7 +1,8 @@
 import React, { useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import { Bell, LogOut, User as UserIcon } from 'lucide-react';
+import { LogOut, User as UserIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import NotificationBell from './NotificationBell';
 
 export default function Header() {
   const { user, logout } = useContext(AuthContext);
@@ -23,10 +24,7 @@ export default function Header() {
       padding: '0 2rem',
       gap: '1.5rem'
     }}>
-      <button style={{ background: 'none', border: 'none', cursor: 'pointer', position: 'relative', color: 'var(--color-text-muted)' }}>
-        <Bell size={20} />
-        <span style={{ position: 'absolute', top: '-2px', right: '-4px', width: '8px', height: '8px', backgroundColor: 'var(--color-danger)', borderRadius: '50%' }}></span>
-      </button>
+      <NotificationBell />
       
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', borderLeft: '1px solid var(--color-border)', paddingLeft: '1.5rem' }}>
         <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'var(--color-primary-light)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
