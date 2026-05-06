@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Check, Info, AlertTriangle, CheckCircle, Clock, Circle } from 'lucide-react';
+import { Bell, Check, Info, AlertTriangle, CheckCircle, Clock, Circle, X } from 'lucide-react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
@@ -58,6 +58,18 @@ export default function NotificationBell() {
       fetchNotifications();
     } catch (err) {
       console.error('Error marking as read:', err);
+    }
+  };
+
+  const handleDeleteNotification = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await axios.delete(`http://localhost:5000/api/notifications/${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      fetchNotifications();
+    } catch (err) {
+      console.error('Error deleting notification:', err);
     }
   };
 
@@ -201,6 +213,15 @@ export default function NotificationBell() {
                       <Circle size={12} fill="var(--color-primary)" />
                     </button>
                   )}
+                  <button 
+                    onClick={(e) => handleDeleteNotification(notif._id, e)}
+                    style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', padding: '0.2rem', alignSelf: 'flex-start' }}
+                    title="Remove notification"
+                    onMouseEnter={(e) => e.currentTarget.style.color = 'var(--color-danger)'}
+                    onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-text-muted)'}
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               ))
             )}

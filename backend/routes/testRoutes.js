@@ -5,6 +5,7 @@ const TestInstance = require('../models/TestInstance');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
+const Notification = require('../models/Notification');
 const { createNotification, notifyLabHeads } = require('../utils/notifier');
 
 // --- BLUEPRINTS ---
@@ -162,6 +163,13 @@ router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req
     instance.previousResults = [];
 
     await instance.save();
+
+    // Delete the 'New Test Assigned' or 'Job Reassigned' notification for the assistant
+    await Notification.deleteMany({
+      recipient: req.user._id,
+      relatedInstanceId: instance._id,
+      $or: [{ title: 'New Test Assigned' }, { title: 'Job Reassigned' }]
+    });
 
     // Notify HEAD for review
     await createNotification({
