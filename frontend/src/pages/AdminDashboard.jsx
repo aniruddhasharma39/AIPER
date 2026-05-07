@@ -5,6 +5,8 @@ import { Trash2, Edit, FileText, Search, ChevronDown, ChevronRight, Activity, Us
 import ReportViewer from '../components/ReportViewer';
 import JobLogTable from '../components/JobLogTable';
 import { AuthContext } from '../context/AuthContext';
+import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
+import Spinner from '../components/Spinner';
 
 function Dashboard() {
   const { user } = useContext(AuthContext);
@@ -15,6 +17,9 @@ function Dashboard() {
     totalAssistants: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.JOBS) || !sessionStorage.getItem(CACHE_KEYS.INSTANCES)
+  );
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -45,6 +50,8 @@ function Dashboard() {
         setRecentActivity(sortedInstances);
       } catch (err) {
         console.error('Error fetching dashboard stats:', err);
+      } finally {
+        setStatsLoading(false);
       }
     };
     fetchStats();
@@ -126,7 +133,9 @@ function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {recentActivity.length === 0 ? (
+              {statsLoading ? (
+                <tr><td colSpan="4"><Spinner message="Fetching activity..." /></td></tr>
+              ) : recentActivity.length === 0 ? (
                 <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>No recent activity detected.</td></tr>
               ) : (
                 recentActivity.map(inst => (
@@ -150,7 +159,10 @@ function Dashboard() {
   );
 }
 
-function StaffTable({ users, emptyMessage }) {
+function StaffTable({ users, isLoading, emptyMessage }) {
+  if (isLoading && users.length === 0) {
+    return <Spinner message={emptyMessage.replace('No ', 'Loading ').replace(' found', '...')} />;
+  }
   if (users.length === 0) {
     return (
       <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
@@ -225,13 +237,19 @@ function UsersPage() {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [usersLoading, setUsersLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.USERS));
 
   const fetchUsers = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/users');
-      setUsers(res.data);
+      await fetchWithCache(
+        'http://localhost:5000/api/users',
+        CACHE_KEYS.USERS,
+        setUsers
+      );
     } catch (err) {
       console.error(err);
+    } finally {
+      setUsersLoading(false);
     }
   };
 
@@ -257,6 +275,7 @@ function UsersPage() {
       setSuccess(`Lab Head created successfully. Temporary password is: ${res.data.temporaryPassword}`);
       setFormData({ name: '', email: '', phone: '', password: '' });
       setShowForm(false);
+      invalidateCache(CACHE_KEYS.USERS);
       fetchUsers();
     } catch (err) {
       setError(err.response?.data?.message || 'Operation failed');
@@ -277,7 +296,19 @@ function UsersPage() {
       </div>
 
       {error && <div style={{ marginBottom: '1rem', color: 'var(--color-danger)', backgroundColor: 'var(--color-danger-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{error}</div>}
-      {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+      {success && (
+        <div style={{ 
+          position: 'fixed', top: '6rem', right: '2rem', zIndex: 1000,
+          color: 'white', backgroundColor: 'var(--color-success)',
+          padding: '1rem 1.5rem', borderRadius: 'var(--radius-md)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex', alignItems: 'center', gap: '0.75rem',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          <CheckCircle size={20} />
+          <span style={{ fontWeight: 500 }}>{success}</span>
+        </div>
+      )}
 
       {showForm && (
         <div className="card" style={{ marginBottom: '1.5rem' }}>
@@ -319,7 +350,7 @@ function UsersPage() {
           isOpen={expanded.management}
           onToggle={() => toggleSection('management')}
         >
-          <StaffTable users={managementUsers} emptyMessage="No management staff found" />
+          <StaffTable users={managementUsers} isLoading={usersLoading} emptyMessage="No management staff found" />
         </CollapsibleSection>
 
         <CollapsibleSection 
@@ -328,7 +359,7 @@ function UsersPage() {
           isOpen={expanded.heads}
           onToggle={() => toggleSection('heads')}
         >
-          <StaffTable users={headUsers} emptyMessage="No department heads found" />
+          <StaffTable users={headUsers} isLoading={usersLoading} emptyMessage="No department heads found" />
         </CollapsibleSection>
 
         <CollapsibleSection 
@@ -337,7 +368,7 @@ function UsersPage() {
           isOpen={expanded.assistants}
           onToggle={() => toggleSection('assistants')}
         >
-          <StaffTable users={assistantUsers} emptyMessage="No lab assistants found" />
+          <StaffTable users={assistantUsers} isLoading={usersLoading} emptyMessage="No lab assistants found" />
         </CollapsibleSection>
       </div>
     </div>
@@ -349,14 +380,29 @@ function Audit() {
   const [jobs, setJobs] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
 
+  const [auditLoading, setAuditLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.INSTANCES) || !sessionStorage.getItem(CACHE_KEYS.JOBS)
+  );
+
   const fetchData = async () => {
     try {
-      const resInst = await axios.get('http://localhost:5000/api/tests/instances');
+      const cachedInst = sessionStorage.getItem(CACHE_KEYS.INSTANCES);
+      const cachedJobs = sessionStorage.getItem(CACHE_KEYS.JOBS);
+      if (cachedInst) setInstances(JSON.parse(cachedInst).filter(i => i.status === 'COMPLETED'));
+      if (cachedJobs) setJobs(JSON.parse(cachedJobs));
+
+      const [resInst, resJobs] = await Promise.all([
+        axios.get('http://localhost:5000/api/tests/instances'),
+        axios.get('http://localhost:5000/api/jobs')
+      ]);
+      sessionStorage.setItem(CACHE_KEYS.INSTANCES, JSON.stringify(resInst.data));
+      sessionStorage.setItem(CACHE_KEYS.JOBS, JSON.stringify(resJobs.data));
       setInstances(resInst.data.filter(i => i.status === 'COMPLETED'));
-      const resJobs = await axios.get('http://localhost:5000/api/jobs');
       setJobs(resJobs.data);
     } catch (err) {
       console.error(err);
+    } finally {
+      setAuditLoading(false);
     }
   };
 
@@ -392,7 +438,9 @@ function Audit() {
               </tr>
             </thead>
             <tbody>
-              {instances.length === 0 ? (
+              {auditLoading && instances.length === 0 ? (
+                <tr><td colSpan="6"><Spinner message="Loading completed tests..." /></td></tr>
+              ) : instances.length === 0 ? (
                 <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests yet.</td></tr>
               ) : (
                 instances.map(inst => (

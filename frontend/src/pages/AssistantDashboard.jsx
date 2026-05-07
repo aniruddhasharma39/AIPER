@@ -1,19 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Play, Check, Clock, AlertTriangle, RotateCcw } from 'lucide-react';
+import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
+import Spinner from '../components/Spinner';
 
 export default function AssistantDashboard() {
   const [tasks, setTasks] = useState([]);
   const [activeTask, setActiveTask] = useState(null);
   const [resultsData, setResultsData] = useState([]);
   const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.MY_TASKS));
 
   const fetchTasks = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/tests/instances');
-      setTasks(res.data);
+      await fetchWithCache(
+        'http://localhost:5000/api/tests/instances',
+        CACHE_KEYS.MY_TASKS,
+        setTasks
+      );
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -21,8 +29,13 @@ export default function AssistantDashboard() {
 
   const openTask = (task) => {
     setActiveTask(task);
-    // Always initialize with empty values — assistant must re-enter
-    setResultsData(task.results.map(r => ({ ...r, value: '' })));
+    // Initialize with existing saved values, or empty strings if not yet started
+    // resultsData now includes the 'isSaved' state from the DB
+    setResultsData(task.results.map(r => ({ 
+      ...r, 
+      value: r.value || '',
+      isSaved: r.isSaved || false 
+    })));
   };
 
   const closeTask = () => {
@@ -33,11 +46,57 @@ export default function AssistantDashboard() {
   const handleResultChange = (index, val) => {
     const updated = [...resultsData];
     updated[index].value = val;
+    // If they change the value, we mark it as unsaved so they have to click save again
+    updated[index].isSaved = false;
     setResultsData(updated);
+  };
+
+  const handleIndividualSave = async (index) => {
+    const updated = [...resultsData];
+    // If value is empty, set to 0 as requested to prevent data loss/nulls
+    if (!updated[index].value || updated[index].value.trim() === '') {
+      updated[index].value = '0';
+    }
+    updated[index].isSaved = true;
+    setResultsData(updated);
+
+    try {
+      await axios.put(`http://localhost:5000/api/tests/instances/${activeTask._id}/save-progress`, {
+        results: updated
+      });
+      setSuccess(`Parameter "${updated[index].name}" saved!`);
+      fetchTasks();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error(err);
+      updated[index].isSaved = false;
+      setResultsData(updated);
+    }
+  };
+
+  const handleSaveProgress = async () => {
+    try {
+      await axios.put(`http://localhost:5000/api/tests/instances/${activeTask._id}/save-progress`, {
+        results: resultsData
+      });
+      setSuccess(`Progress for ${activeTask.testCode} saved! You can continue later.`);
+      fetchTasks(); // refresh task list silently
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Final validation: ensure all parameters are saved/filled
+    const unsaved = resultsData.filter(r => !r.isSaved);
+    if (unsaved.length > 0) {
+      alert(`Please save all parameters before submitting. (${unsaved.length} remaining)`);
+      return;
+    }
+
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${activeTask._id}/results`, {
         results: resultsData
@@ -69,7 +128,26 @@ export default function AssistantDashboard() {
         <Clock size={28} style={{ color: 'var(--color-primary)' }}/> Task Queue
       </h1>
       
-      {success && <div style={{ marginBottom: '1.5rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+      {success && (
+        <div style={{ 
+          position: 'fixed', 
+          top: '6rem', 
+          right: '2rem', 
+          zIndex: 1000,
+          color: 'white', 
+          backgroundColor: 'var(--color-success)', 
+          padding: '1rem 1.5rem', 
+          borderRadius: 'var(--radius-md)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          <Check size={20} />
+          <span style={{ fontWeight: 500 }}>{success}</span>
+        </div>
+      )}
 
       {activeTask ? (
         <div className="card" style={{ marginBottom: '2rem', borderTop: `4px solid ${isReassigned(activeTask) ? 'var(--color-danger)' : 'var(--color-primary)'}` }}>
@@ -131,11 +209,29 @@ export default function AssistantDashboard() {
                         type="text" 
                         value={resItem.value} 
                         onChange={e => handleResultChange(i, e.target.value)} 
-                        required 
                         placeholder="Enter value..."
-                        style={{ flex: 1 }}
+                        style={{ 
+                          flex: 1, 
+                          borderColor: resItem.isSaved ? 'var(--color-success)' : 'var(--color-border)',
+                          backgroundColor: resItem.isSaved ? 'rgba(46, 204, 113, 0.05)' : 'white'
+                        }}
                       />
                       <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', width: '60px' }}>{resItem.unit}</span>
+                      
+                      <button 
+                        type="button" 
+                        onClick={() => handleIndividualSave(i)}
+                        className="btn"
+                        style={{ 
+                          padding: '0.4rem 0.8rem', 
+                          fontSize: '0.8rem',
+                          backgroundColor: resItem.isSaved ? 'var(--color-success)' : 'var(--color-primary)',
+                          color: 'white',
+                          minWidth: '80px'
+                        }}
+                      >
+                        {resItem.isSaved ? <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><Check size={14}/> Saved</span> : 'Save'}
+                      </button>
                     </div>
                   </div>
                 );
@@ -146,6 +242,9 @@ export default function AssistantDashboard() {
               <button type="submit" className="btn btn-success" style={{ flex: 2, justifyContent: 'center' }}>
                 <Check size={18} style={{ marginRight: '0.5rem' }}/> Submit for Review
               </button>
+              <button type="button" className="btn btn-primary" onClick={handleSaveProgress} style={{ flex: 1, justifyContent: 'center' }}>
+                Save Draft
+              </button>
               <button type="button" className="btn" onClick={closeTask} style={{ flex: 1, justifyContent: 'center', backgroundColor: 'transparent', border: '1px solid var(--color-border)' }}>
                 Cancel
               </button>
@@ -154,7 +253,11 @@ export default function AssistantDashboard() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' }}>
-          {tasks.length === 0 ? (
+          {loading ? (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <Spinner message="Loading your tasks..." />
+            </div>
+          ) : tasks.length === 0 ? (
             <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
               No pending tasks in your queue.
             </div>

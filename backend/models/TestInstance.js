@@ -5,7 +5,8 @@ const resultParameterSchema = new mongoose.Schema({
   name: { type: String }, // copied from blueprint
   value: { type: String }, // filled by assistant
   unit: { type: String },
-  referenceRange: { type: String }
+  referenceRange: { type: String },
+  isSaved: { type: Boolean, default: false }
 });
 
 const reviewEntrySchema = new mongoose.Schema({

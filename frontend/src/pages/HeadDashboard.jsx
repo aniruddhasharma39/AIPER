@@ -6,6 +6,8 @@ import { AuthContext } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import ReportViewer from '../components/ReportViewer';
 import JobLogTable from '../components/JobLogTable';
+import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
+import Spinner from '../components/Spinner';
 
 function Dashboard() {
   const { user } = useContext(AuthContext);
@@ -16,6 +18,9 @@ function Dashboard() {
     totalAssistants: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.JOBS) || !sessionStorage.getItem(CACHE_KEYS.INSTANCES)
+  );
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -44,6 +49,8 @@ function Dashboard() {
         setRecentActivity(sortedInstances);
       } catch (err) {
         console.error('Error fetching dashboard stats:', err);
+      } finally {
+        setStatsLoading(false);
       }
     };
     fetchStats();
@@ -125,7 +132,9 @@ function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {recentActivity.length === 0 ? (
+              {statsLoading ? (
+                <tr><td colSpan="4"><Spinner message="Fetching activity..." /></td></tr>
+              ) : recentActivity.length === 0 ? (
                 <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>No recent activity detected.</td></tr>
               ) : (
                 recentActivity.map(inst => (
@@ -160,13 +169,19 @@ function Assistants() {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [usersLoading, setUsersLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.USERS));
 
   const fetchUsers = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/users');
-      setUsers(res.data);
+      await fetchWithCache(
+        'http://localhost:5000/api/users',
+        CACHE_KEYS.USERS,
+        setUsers
+      );
     } catch (err) {
       console.error(err);
+    } finally {
+      setUsersLoading(false);
     }
   };
 
@@ -193,6 +208,7 @@ function Assistants() {
       }
       setFormData({ name: '', email: '', phone: '', password: '' });
       setEditUserId(null); setShowForm(false);
+      invalidateCache(CACHE_KEYS.USERS);
       fetchUsers();
     } catch (err) {
       setError(err.response?.data?.message || 'Operation failed');
@@ -210,7 +226,9 @@ function Assistants() {
     if (!userToDelete) return;
     try {
       await axios.delete(`http://localhost:5000/api/users/${userToDelete._id}`);
-      setUserToDelete(null); fetchUsers();
+      setUserToDelete(null);
+      invalidateCache(CACHE_KEYS.USERS);
+      fetchUsers();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to delete');
       setUserToDelete(null);
@@ -268,7 +286,9 @@ function Assistants() {
             <tr><th>Name</th><th>Email</th><th>Role</th><th>Action</th></tr>
           </thead>
           <tbody>
-            {users.length === 0 ? (
+            {usersLoading && users.length === 0 ? (
+              <tr><td colSpan="4"><Spinner message="Loading assistants..." /></td></tr>
+            ) : users.length === 0 ? (
               <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem' }}>No assistants found</td></tr>
             ) : (
               users.map(u => (
@@ -443,16 +463,19 @@ function Dispatcher() {
     jobId: '', deadline: '', assignedTo: ''
   });
   const [success, setSuccess] = useState('');
+  const [dispatchLoading, setDispatchLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.JOBS) || !sessionStorage.getItem(CACHE_KEYS.USERS)
+  );
 
   useEffect(() => {
-    axios.get('http://localhost:5000/api/users').then(res => setAssistants(res.data)).catch(console.error);
+    const dept = user?.department ? user.department.toLowerCase() : '';
+    
+    fetchWithCache('http://localhost:5000/api/users', CACHE_KEYS.USERS, setAssistants)
+      .catch(console.error);
 
-    // Fetch Jobs assigned to this head
-    axios.get('http://localhost:5000/api/jobs').then(res => {
-      const dept = user?.department ? user.department.toLowerCase() : '';
-      // filter pending
-      setJobs(res.data.filter(j => j.distribution[dept]?.status === 'PENDING'));
-    }).catch(console.error);
+    fetchWithCache('http://localhost:5000/api/jobs', CACHE_KEYS.JOBS,
+      (data) => setJobs(data.filter(j => j.distribution[dept]?.status === 'PENDING'))
+    ).catch(console.error).finally(() => setDispatchLoading(false));
   }, [user]);
 
   const handleSubmit = async (e) => {
@@ -465,9 +488,10 @@ function Dispatcher() {
 
       // refresh jobs
       const dept = user?.department ? user.department.toLowerCase() : '';
-      axios.get('http://localhost:5000/api/jobs').then(res => {
-        setJobs(res.data.filter(j => j.distribution[dept]?.status === 'PENDING'));
-      });
+      invalidateCache(CACHE_KEYS.JOBS);
+      fetchWithCache('http://localhost:5000/api/jobs', CACHE_KEYS.JOBS,
+        (data) => setJobs(data.filter(j => j.distribution[dept]?.status === 'PENDING'))
+      );
     } catch (err) {
       console.error(err);
       alert('Error: ' + (err.response?.data?.message || err.message));
@@ -526,13 +550,19 @@ function ReviewQueue() {
   const [reassignNote, setReassignNote] = useState('');
   const [showReassignForm, setShowReassignForm] = useState(null);
   const [success, setSuccess] = useState('');
+  const [reviewLoading, setReviewLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.INSTANCES));
 
   const fetchReviewItems = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/tests/instances');
-      setInstances(res.data.filter(i => i.status === 'PENDING_HEAD_REVIEW'));
+      await fetchWithCache(
+        'http://localhost:5000/api/tests/instances',
+        CACHE_KEYS.INSTANCES,
+        (data) => setInstances(data.filter(i => i.status === 'PENDING_HEAD_REVIEW'))
+      );
     } catch (err) {
       console.error(err);
+    } finally {
+      setReviewLoading(false);
     }
   };
 
@@ -542,6 +572,7 @@ function ReviewQueue() {
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${id}/review`, { action: 'APPROVE' });
       setSuccess('Approved and forwarded to Lab Head for final review.');
+      invalidateCache(CACHE_KEYS.INSTANCES);
       fetchReviewItems();
       setSelectedInstance(null);
       setTimeout(() => setSuccess(''), 4000);
@@ -559,6 +590,7 @@ function ReviewQueue() {
       setSuccess('Sent back to analyst for correction.');
       setReassignNote('');
       setShowReassignForm(null);
+      invalidateCache(CACHE_KEYS.INSTANCES);
       fetchReviewItems();
       setSelectedInstance(null);
       setTimeout(() => setSuccess(''), 4000);
@@ -574,9 +606,23 @@ function ReviewQueue() {
       </h1>
       <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>Review analyst submissions before forwarding to Lab Head.</p>
 
-      {success && <div style={{ marginBottom: '1.5rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+      {success && (
+        <div style={{ 
+          position: 'fixed', top: '6rem', right: '2rem', zIndex: 1000,
+          color: 'white', backgroundColor: 'var(--color-success)', 
+          padding: '1rem 1.5rem', borderRadius: 'var(--radius-md)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex', alignItems: 'center', gap: '0.75rem',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          <CheckCircle size={20} />
+          <span style={{ fontWeight: 500 }}>{success}</span>
+        </div>
+      )}
 
-      {instances.length === 0 ? (
+      {reviewLoading && instances.length === 0 ? (
+        <div className="card"><Spinner message="Loading review queue..." /></div>
+      ) : instances.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
           No submissions awaiting your review.
         </div>
@@ -691,35 +737,41 @@ function Audit() {
   const [instances, setInstances] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.INSTANCES) || !sessionStorage.getItem(CACHE_KEYS.JOBS)
+  );
 
   const fetchData = async () => {
     try {
+      const cachedInst = sessionStorage.getItem(CACHE_KEYS.INSTANCES);
+      const cachedJobs = sessionStorage.getItem(CACHE_KEYS.JOBS);
+
+      const processData = (allInstances, allJobs) => {
+        const isJobFullyCompleted = (job) => {
+          const microOk = !job.distribution?.micro?.required || job.distribution.micro.status === 'COMPLETED';
+          const macroOk = !job.distribution?.macro?.required || job.distribution.macro.status === 'COMPLETED';
+          return microOk && macroOk;
+        };
+        const fullyCompletedJobIds = new Set(allJobs.filter(j => isJobFullyCompleted(j)).map(j => j._id));
+        setInstances(allInstances.filter(i => i.status === 'COMPLETED' && fullyCompletedJobIds.has(i.jobId)));
+        setJobs(allJobs);
+      };
+
+      if (cachedInst && cachedJobs) {
+        processData(JSON.parse(cachedInst), JSON.parse(cachedJobs));
+      }
+
       const [resInst, resJobs] = await Promise.all([
         axios.get('http://localhost:5000/api/tests/instances'),
         axios.get('http://localhost:5000/api/jobs')
       ]);
-
-      const allInstances = resInst.data;
-      const allJobs = resJobs.data;
-
-      const isJobFullyCompleted = (job) => {
-        const microOk = !job.distribution?.micro?.required || job.distribution.micro.status === 'COMPLETED';
-        const macroOk = !job.distribution?.macro?.required || job.distribution.macro.status === 'COMPLETED';
-        return microOk && macroOk;
-      };
-
-      const fullyCompletedJobIds = new Set(
-        allJobs.filter(j => isJobFullyCompleted(j)).map(j => j._id)
-      );
-
-      setInstances(
-        allInstances.filter(i =>
-          i.status === 'COMPLETED' && fullyCompletedJobIds.has(i.jobId)
-        )
-      );
-      setJobs(allJobs);
+      sessionStorage.setItem(CACHE_KEYS.INSTANCES, JSON.stringify(resInst.data));
+      sessionStorage.setItem(CACHE_KEYS.JOBS, JSON.stringify(resJobs.data));
+      processData(resInst.data, resJobs.data);
     } catch (err) {
       console.error(err);
+    } finally {
+      setAuditLoading(false);
     }
   };
 
@@ -755,7 +807,9 @@ function Audit() {
               </tr>
             </thead>
             <tbody>
-              {instances.length === 0 ? (
+              {auditLoading && instances.length === 0 ? (
+                <tr><td colSpan="6"><Spinner message="Loading completed tests..." /></td></tr>
+              ) : instances.length === 0 ? (
                 <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests in your department yet.</td></tr>
               ) : (
                 instances.map(inst => (
