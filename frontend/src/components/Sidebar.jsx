@@ -2,6 +2,7 @@ import React, { useContext } from 'react';
 import { NavLink } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { Activity, Users, FileText, LayoutDashboard, Settings, ClipboardCheck } from 'lucide-react';
+import logo from '../assets/Acropolis20Logo.png';
 
 export default function Sidebar() {
   const { user } = useContext(AuthContext);
@@ -50,14 +51,8 @@ export default function Sidebar() {
       boxShadow: 'var(--shadow-lg)',
       zIndex: 10
     }}>
-      <div style={{ padding: '2rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', borderBottom: '1px solid var(--color-primary-light)'}}>
-        <div style={{ width: '32px', height: '32px', background: 'var(--color-success)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Activity size={20} color="white" />
-        </div>
-        <div>
-          <h2 style={{ color: 'white', margin: 0, fontSize: '1.25rem' }}>FoodLab</h2>
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Scientific OS</span>
-        </div>
+      <div style={{ padding: '1.5rem', display: 'flex', justifyContent: 'center', alignItems: 'center', borderBottom: '1px solid var(--color-primary-light)', backgroundColor: 'white'}}>
+        <img src={logo} alt="Acropolis Logo" style={{ maxWidth: '100%', maxHeight: '60px', objectFit: 'contain' }} />
       </div>
       
       <nav style={{ padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
