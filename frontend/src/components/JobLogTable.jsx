@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Search, ChevronDown, ChevronRight, Filter } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, Filter, Trash2 } from 'lucide-react';
 import JobTimeline from './JobTimeline';
 
-export default function JobLogTable({ jobs, title = "Job Logs" }) {
+export default function JobLogTable({ jobs, title = "Job Logs", onDeleteJob }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [expandedJobId, setExpandedJobId] = useState(null);
@@ -93,7 +93,18 @@ export default function JobLogTable({ jobs, title = "Job Logs" }) {
                   <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{job.jobCode}</td>
                   <td>{job.clientName}</td>
                   <td>{new Date(job.createdAt).toLocaleDateString()}</td>
-                  <td><StatusBadge status={getJobStatus(job)} /></td>
+                  <td style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <StatusBadge status={getJobStatus(job)} />
+                    {onDeleteJob && (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onDeleteJob(job._id); }} 
+                        style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.2rem' }}
+                        title="Delete Job"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </td>
                 </tr>
                 {expandedJobId === job._id && (
                   <tr>

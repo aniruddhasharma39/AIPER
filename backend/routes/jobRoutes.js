@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Job = require('../models/Job');
 const TestInstance = require('../models/TestInstance');
+const Notification = require('../models/Notification');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const { createNotification, notifyAdmins, notifyLabHeads } = require('../utils/notifier');
@@ -104,6 +105,29 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
     res.status(201).json(job);
   } catch (error) {
     res.status(500).json({ message: 'Error creating job', error: error.message });
+  }
+});
+
+// Delete a job
+router.delete('/:id', protect, authorize('LAB_HEAD', 'ADMIN'), async (req, res) => {
+  try {
+    const job = await Job.findById(req.params.id);
+    if (!job) {
+      return res.status(404).json({ message: 'Job not found' });
+    }
+
+    // Delete associated TestInstances
+    await TestInstance.deleteMany({ jobId: job._id });
+    
+    // Delete associated Notifications
+    await Notification.deleteMany({ relatedJobId: job._id });
+
+    // Delete the job itself
+    await Job.findByIdAndDelete(job._id);
+
+    res.json({ message: 'Job and associated records deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error deleting job', error: error.message });
   }
 });
 

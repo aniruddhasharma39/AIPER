@@ -6,6 +6,8 @@ import { AuthContext } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import ReportViewer from '../components/ReportViewer';
 import JobLogTable from '../components/JobLogTable';
+import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
+import Spinner from '../components/Spinner';
 
 function Dashboard() {
   const { user } = useContext(AuthContext);
@@ -16,6 +18,9 @@ function Dashboard() {
     totalAssistants: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.JOBS) || !sessionStorage.getItem(CACHE_KEYS.INSTANCES)
+  );
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -44,6 +49,8 @@ function Dashboard() {
         setRecentActivity(sortedInstances);
       } catch (err) {
         console.error('Error fetching dashboard stats:', err);
+      } finally {
+        setStatsLoading(false);
       }
     };
     fetchStats();
@@ -125,7 +132,9 @@ function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {recentActivity.length === 0 ? (
+              {statsLoading ? (
+                <tr><td colSpan="4"><Spinner message="Fetching activity..." /></td></tr>
+              ) : recentActivity.length === 0 ? (
                 <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>No recent activity detected.</td></tr>
               ) : (
                 recentActivity.map(inst => (
@@ -160,13 +169,19 @@ function Assistants() {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [usersLoading, setUsersLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.USERS));
 
   const fetchUsers = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/users');
-      setUsers(res.data);
+      await fetchWithCache(
+        'http://localhost:5000/api/users',
+        CACHE_KEYS.USERS,
+        setUsers
+      );
     } catch (err) {
       console.error(err);
+    } finally {
+      setUsersLoading(false);
     }
   };
 
@@ -193,6 +208,7 @@ function Assistants() {
       }
       setFormData({ name: '', email: '', phone: '', password: '' });
       setEditUserId(null); setShowForm(false);
+      invalidateCache(CACHE_KEYS.USERS);
       fetchUsers();
     } catch (err) {
       setError(err.response?.data?.message || 'Operation failed');
@@ -210,7 +226,9 @@ function Assistants() {
     if (!userToDelete) return;
     try {
       await axios.delete(`http://localhost:5000/api/users/${userToDelete._id}`);
-      setUserToDelete(null); fetchUsers();
+      setUserToDelete(null);
+      invalidateCache(CACHE_KEYS.USERS);
+      fetchUsers();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to delete');
       setUserToDelete(null);
@@ -268,7 +286,9 @@ function Assistants() {
             <tr><th>Name</th><th>Email</th><th>Role</th><th>Action</th></tr>
           </thead>
           <tbody>
-            {users.length === 0 ? (
+            {usersLoading && users.length === 0 ? (
+              <tr><td colSpan="4"><Spinner message="Loading assistants..." /></td></tr>
+            ) : users.length === 0 ? (
               <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem' }}>No assistants found</td></tr>
             ) : (
               users.map(u => (
@@ -298,86 +318,180 @@ function Assistants() {
   );
 }
 
+function Blueprints() {
+  const [blueprints, setBlueprints] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const { user } = useContext(AuthContext);
+  const defaultUnits = ["mg/L", "ppm", "pH", "%", "CFU/g", "Custom..."];
+
+  const [parameters, setParameters] = useState([
+    { name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }
+  ]);
+
+  const fetchBlueprints = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/tests/blueprints');
+      setBlueprints(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => { fetchBlueprints(); }, []);
+
+  const addParameterRow = () => {
+    setParameters([...parameters, { name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }]);
+  };
+
+  const removeParameterRow = (index) => {
+    setParameters(parameters.filter((_, i) => i !== index));
+  };
+
+  const updateParameter = (index, field, value) => {
+    const updated = [...parameters];
+    updated[index][field] = value;
+    setParameters(updated);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (parameters.length === 0) {
+      setError('At least one parameter is required');
+      return;
+    }
+    try {
+      const finalParams = parameters.map(p => ({
+        name: p.name,
+        referenceRange: p.referenceRange,
+        unit: p.unitType === 'Custom...' ? p.customUnit : p.unitType
+      }));
+      await axios.post('http://localhost:5000/api/tests/blueprints', {
+        name, department: user.department || 'HQ', parameters: finalParams
+      });
+      setName(''); setParameters([{ name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }]);
+      setShowForm(false);
+      fetchBlueprints();
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.message || err.response?.data?.error || err.message || 'Operation failed');
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <h1>Test Blueprints</h1>
+        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
+          {showForm ? 'Close' : '+ New Blueprint'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Create Test Blueprint</h3>
+          {error && <div style={{ marginBottom: '1rem', color: 'var(--color-danger)', backgroundColor: 'var(--color-danger-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{error}</div>}
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <input style={{ flex: 1 }} type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="Blueprint Name (e.g. Soil Chemistry Profile)" />
+            </div>
+
+            <div style={{ marginTop: '0.5rem' }}>
+              <h4 style={{ marginBottom: '1rem' }}>Parameters</h4>
+            </div>
+
+            {parameters.map((p, i) => (
+              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input style={{ flex: 2 }} type="text" value={p.name} onChange={e => updateParameter(i, 'name', e.target.value)} required placeholder="Parameter Name" />
+                <input style={{ flex: 1.5 }} type="text" value={p.referenceRange} onChange={e => updateParameter(i, 'referenceRange', e.target.value)} required placeholder="Reference Range" />
+                <select style={{ flex: 1 }} value={p.unitType} onChange={e => updateParameter(i, 'unitType', e.target.value)} required>
+                  {defaultUnits.map(du => <option key={du} value={du}>{du}</option>)}
+                </select>
+                {p.unitType === 'Custom...' && (
+                  <input style={{ flex: 1 }} type="text" value={p.customUnit} onChange={e => updateParameter(i, 'customUnit', e.target.value)} required placeholder="Custom Unit" />
+                )}
+                {parameters.length > 1 && (
+                  <button type="button" onClick={() => removeParameterRow(i)} style={{ border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0 0.5rem' }}>
+                    <Trash2 size={20} />
+                  </button>
+                )}
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+              <button type="button" onClick={addParameterRow} className="btn" style={{ border: '1px solid var(--color-border)', alignSelf: 'flex-start' }}>
+                + Add Parameter
+              </button>
+              <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>
+                Save Blueprint
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {blueprints.length === 0 ? <p style={{ color: 'var(--color-text-muted)' }}>No blueprints created yet.</p> : null}
+        {blueprints.map(bp => (
+          <div key={bp._id} className="card" style={{ padding: '1rem 1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: 'var(--color-primary-dark)' }}>{bp.name}</h3>
+              <span className="badge badge-warning">{bp.parameters.length} Parameters</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
+              {bp.parameters.map(p => (
+                <div key={p._id} style={{ fontSize: '0.85rem', backgroundColor: 'var(--color-surface-hover)', border: '1px solid var(--color-border)', padding: '0.3rem 0.6rem', borderRadius: '4px' }}>
+                  <b>{p.name}</b> ({p.unit})
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Dispatcher() {
   const [assistants, setAssistants] = useState([]);
   const [jobs, setJobs] = useState([]);
   const { user } = useContext(AuthContext);
 
   const [formData, setFormData] = useState({
-    jobId: '', deadline: ''
+    jobId: '', deadline: '', assignedTo: ''
   });
-  const [assignments, setAssignments] = useState({}); // parameterId -> assignedTo assistant ID
   const [success, setSuccess] = useState('');
+  const [dispatchLoading, setDispatchLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.JOBS) || !sessionStorage.getItem(CACHE_KEYS.USERS)
+  );
 
   useEffect(() => {
-    axios.get('http://localhost:5000/api/users').then(res => {
-      const dept = user?.department ? user.department : '';
-      setAssistants(res.data.filter(u => u.role === 'ASSISTANT' && u.department === dept));
-    }).catch(console.error);
+    const dept = user?.department ? user.department.toLowerCase() : '';
+    
+    fetchWithCache('http://localhost:5000/api/users', CACHE_KEYS.USERS, setAssistants)
+      .catch(console.error);
 
-    // Fetch Jobs assigned to this head
-    axios.get('http://localhost:5000/api/jobs').then(res => {
-      const dept = user?.department ? user.department.toLowerCase() : '';
-      // filter pending
-      setJobs(res.data.filter(j => j.distribution[dept === 'chemical' ? 'macro' : dept]?.status === 'PENDING'));
-    }).catch(console.error);
+    fetchWithCache('http://localhost:5000/api/jobs', CACHE_KEYS.JOBS,
+      (data) => setJobs(data.filter(j => j.distribution[dept]?.status === 'PENDING'))
+    ).catch(console.error).finally(() => setDispatchLoading(false));
   }, [user]);
-
-  const selectedJob = jobs.find(j => j._id === formData.jobId);
-  const deptParams = selectedJob?.parameters?.filter(p => {
-    const d = user?.department ? user.department.toLowerCase() : '';
-    const pt = p.type ? p.type.toLowerCase() : '';
-    if ((d === 'macro' || d === 'chemical') && pt === 'chemical') return true;
-    if (d === 'micro' && pt === 'micro') return true;
-    return false;
-  }) || [];
-
-  const handleAssign = (paramId, assistantId) => {
-    setAssignments({ ...assignments, [paramId]: assistantId });
-  };
-
-  const handleAssignAll = (e) => {
-    const assistantId = e.target.value;
-    if (!assistantId) return;
-    const newAssignments = { ...assignments };
-    deptParams.forEach(p => {
-      newAssignments[p.parameterId._id] = assistantId;
-    });
-    setAssignments(newAssignments);
-    // reset select
-    e.target.value = "";
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (Object.keys(assignments).length !== deptParams.length) {
-      return alert('Please assign all parameters');
-    }
     try {
-      const assignmentList = deptParams.map(p => ({
-        parameterId: p.parameterId._id,
-        name: p.name,
-        type: p.type,
-        unit: p.unit,
-        assignedTo: assignments[p.parameterId._id]
-      }));
-
-      await axios.post('http://localhost:5000/api/tests/instances', {
-        jobId: formData.jobId,
-        deadline: formData.deadline,
-        assignments: assignmentList
-      });
-      
+      await axios.post('http://localhost:5000/api/tests/instances', formData);
       setSuccess('Job dispatched successfully!');
-      setFormData({ jobId: '', deadline: '' });
-      setAssignments({});
+      setFormData({ jobId: '', deadline: '', assignedTo: '' });
       setTimeout(() => setSuccess(''), 4000);
 
       // refresh jobs
       const dept = user?.department ? user.department.toLowerCase() : '';
-      axios.get('http://localhost:5000/api/jobs').then(res => {
-        setJobs(res.data.filter(j => j.distribution[dept === 'chemical' ? 'macro' : dept]?.status === 'PENDING'));
-      });
+      invalidateCache(CACHE_KEYS.JOBS);
+      fetchWithCache('http://localhost:5000/api/jobs', CACHE_KEYS.JOBS,
+        (data) => setJobs(data.filter(j => j.distribution[dept]?.status === 'PENDING'))
+      );
     } catch (err) {
       console.error(err);
       alert('Error: ' + (err.response?.data?.message || err.message));
@@ -394,63 +508,34 @@ function Dispatcher() {
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Pending Sample Job</label>
-            <select value={formData.jobId} onChange={e => { setFormData({ ...formData, jobId: e.target.value }); setAssignments({}); }} required>
+            <select value={formData.jobId} onChange={e => setFormData({ ...formData, jobId: e.target.value })} required>
               <option value="" disabled>--- Select a Job ---</option>
-              {jobs.map(j => (
-                <option key={j._id} value={j._id}>
-                  {j.jobCode} - {j.clientName}
-                </option>
-              ))}
+              {jobs.map(j => {
+                const dept = user?.department ? user.department.toLowerCase() : '';
+                return (
+                  <option key={j._id} value={j._id}>
+                    {j.jobCode} - {j.clientName} (Vol: {j.distribution[dept]?.volume})
+                  </option>
+                );
+              })}
             </select>
           </div>
 
-          {selectedJob && deptParams.length > 0 && (
-            <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h4 style={{ margin: 0 }}>Assign Parameters ({deptParams.length} total)</h4>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Bulk assign all to:</label>
-                  <select onChange={handleAssignAll} defaultValue="">
-                    <option value="" disabled>Select assistant...</option>
-                    {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {deptParams.map(p => (
-                  <div key={p.parameterId._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--color-surface-hover)', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', gap: '1rem' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', flex: 1 }}>
-                      <input
-                        type="checkbox"
-                        checked={!!assignments[p.parameterId._id]}
-                        onChange={e => {
-                          if (!e.target.checked) handleAssign(p.parameterId._id, '');
-                        }}
-                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                      />
-                      <span><b>{p.name}</b> <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>({p.unit})</span></span>
-                    </label>
-                    <select
-                      value={assignments[p.parameterId._id] || ''}
-                      onChange={e => handleAssign(p.parameterId._id, e.target.value)}
-                      required
-                      style={{ minWidth: '160px' }}
-                    >
-                      <option value="" disabled>Assign Assistant...</option>
-                      {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
-                    </select>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Global Deadline</label>
             <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({ ...formData, deadline: e.target.value })} required />
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }} disabled={jobs.length === 0 || deptParams.length === 0}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Assign to Lab Assistant</label>
+            <select value={formData.assignedTo} onChange={e => setFormData({ ...formData, assignedTo: e.target.value })} required>
+              <option value="" disabled>--- Assign Assistant ---</option>
+              {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name} ({ast.email})</option>)}
+            </select>
+          </div>
+
+          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }} disabled={jobs.length === 0}>
             {jobs.length === 0 ? 'No Pending Jobs' : 'Submit & Dispatch Secure Job'}
           </button>
         </form>
@@ -465,13 +550,19 @@ function ReviewQueue() {
   const [reassignNote, setReassignNote] = useState('');
   const [showReassignForm, setShowReassignForm] = useState(null);
   const [success, setSuccess] = useState('');
+  const [reviewLoading, setReviewLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.INSTANCES));
 
   const fetchReviewItems = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/tests/instances');
-      setInstances(res.data.filter(i => i.status === 'PENDING_HEAD_REVIEW'));
+      await fetchWithCache(
+        'http://localhost:5000/api/tests/instances',
+        CACHE_KEYS.INSTANCES,
+        (data) => setInstances(data.filter(i => i.status === 'PENDING_HEAD_REVIEW'))
+      );
     } catch (err) {
       console.error(err);
+    } finally {
+      setReviewLoading(false);
     }
   };
 
@@ -481,6 +572,7 @@ function ReviewQueue() {
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${id}/review`, { action: 'APPROVE' });
       setSuccess('Approved and forwarded to Lab Head for final review.');
+      invalidateCache(CACHE_KEYS.INSTANCES);
       fetchReviewItems();
       setSelectedInstance(null);
       setTimeout(() => setSuccess(''), 4000);
@@ -498,6 +590,7 @@ function ReviewQueue() {
       setSuccess('Sent back to analyst for correction.');
       setReassignNote('');
       setShowReassignForm(null);
+      invalidateCache(CACHE_KEYS.INSTANCES);
       fetchReviewItems();
       setSelectedInstance(null);
       setTimeout(() => setSuccess(''), 4000);
@@ -513,9 +606,23 @@ function ReviewQueue() {
       </h1>
       <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>Review analyst submissions before forwarding to Lab Head.</p>
 
-      {success && <div style={{ marginBottom: '1.5rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+      {success && (
+        <div style={{ 
+          position: 'fixed', top: '6rem', right: '2rem', zIndex: 1000,
+          color: 'white', backgroundColor: 'var(--color-success)', 
+          padding: '1rem 1.5rem', borderRadius: 'var(--radius-md)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex', alignItems: 'center', gap: '0.75rem',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          <CheckCircle size={20} />
+          <span style={{ fontWeight: 500 }}>{success}</span>
+        </div>
+      )}
 
-      {instances.length === 0 ? (
+      {reviewLoading && instances.length === 0 ? (
+        <div className="card"><Spinner message="Loading review queue..." /></div>
+      ) : instances.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
           No submissions awaiting your review.
         </div>
@@ -528,9 +635,9 @@ function ReviewQueue() {
                 onClick={() => setSelectedInstance(selectedInstance === inst._id ? null : inst._id)}
               >
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>Test {inst.testCode}</div>
+                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{inst.blueprintId?.name}</div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
-                    Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
+                    Code: <span style={{ fontFamily: 'monospace' }}>{inst.testCode}</span> · Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
                   </div>
                 </div>
                 <span className="badge badge-warning">Awaiting Review</span>
@@ -630,35 +737,41 @@ function Audit() {
   const [instances, setInstances] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.INSTANCES) || !sessionStorage.getItem(CACHE_KEYS.JOBS)
+  );
 
   const fetchData = async () => {
     try {
+      const cachedInst = sessionStorage.getItem(CACHE_KEYS.INSTANCES);
+      const cachedJobs = sessionStorage.getItem(CACHE_KEYS.JOBS);
+
+      const processData = (allInstances, allJobs) => {
+        const isJobFullyCompleted = (job) => {
+          const microOk = !job.distribution?.micro?.required || job.distribution.micro.status === 'COMPLETED';
+          const macroOk = !job.distribution?.macro?.required || job.distribution.macro.status === 'COMPLETED';
+          return microOk && macroOk;
+        };
+        const fullyCompletedJobIds = new Set(allJobs.filter(j => isJobFullyCompleted(j)).map(j => j._id));
+        setInstances(allInstances.filter(i => i.status === 'COMPLETED' && fullyCompletedJobIds.has(i.jobId)));
+        setJobs(allJobs);
+      };
+
+      if (cachedInst && cachedJobs) {
+        processData(JSON.parse(cachedInst), JSON.parse(cachedJobs));
+      }
+
       const [resInst, resJobs] = await Promise.all([
         axios.get('http://localhost:5000/api/tests/instances'),
         axios.get('http://localhost:5000/api/jobs')
       ]);
-
-      const allInstances = resInst.data;
-      const allJobs = resJobs.data;
-
-      const isJobFullyCompleted = (job) => {
-        const microOk = !job.distribution?.micro?.required || job.distribution.micro.status === 'COMPLETED';
-        const macroOk = !job.distribution?.macro?.required || job.distribution.macro.status === 'COMPLETED';
-        return microOk && macroOk;
-      };
-
-      const fullyCompletedJobIds = new Set(
-        allJobs.filter(j => isJobFullyCompleted(j)).map(j => j._id)
-      );
-
-      setInstances(
-        allInstances.filter(i =>
-          i.status === 'COMPLETED' && fullyCompletedJobIds.has(i.jobId)
-        )
-      );
-      setJobs(allJobs);
+      sessionStorage.setItem(CACHE_KEYS.INSTANCES, JSON.stringify(resInst.data));
+      sessionStorage.setItem(CACHE_KEYS.JOBS, JSON.stringify(resJobs.data));
+      processData(resInst.data, resJobs.data);
     } catch (err) {
       console.error(err);
+    } finally {
+      setAuditLoading(false);
     }
   };
 
@@ -694,7 +807,9 @@ function Audit() {
               </tr>
             </thead>
             <tbody>
-              {instances.length === 0 ? (
+              {auditLoading && instances.length === 0 ? (
+                <tr><td colSpan="6"><Spinner message="Loading completed tests..." /></td></tr>
+              ) : instances.length === 0 ? (
                 <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests in your department yet.</td></tr>
               ) : (
                 instances.map(inst => (
