@@ -42,14 +42,18 @@ router.get('/', protect, async (req, res) => {
 // Create a new job (LAB_HEAD only)
 router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
   try {
-    const { clientName, totalSampleVolume, distribution } = req.body;
-    
+    const { customer, sample, compliance, distribution } = req.body;
+
     const jobCode = 'JOB-' + Math.floor(1000 + Math.random() * 9000);
 
     const job = await Job.create({
       jobCode,
-      clientName,
-      totalSampleVolume,
+      // Populate legacy clientName from customer.customer_name for backward compat
+      clientName: customer?.customer_name,
+      totalSampleVolume: parseFloat(sample?.sample_quantity) || 0,
+      customer,
+      sample,
+      compliance,
       distribution,
       createdBy: req.user._id
     });
@@ -58,7 +62,7 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
     await notifyAdmins({
       type: 'INFO',
       title: 'New Job Logged',
-      message: `Job ${jobCode} for client ${clientName} has been created.`,
+      message: `Job ${jobCode} for client ${customer?.customer_name} has been created.`,
       relatedJobId: job._id
     });
 
@@ -72,7 +76,7 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
         relatedJobId: job._id
       });
     }
-    
+
     if (distribution?.macro?.required && distribution.macro.assignedTo) {
       await createNotification({
         recipient: distribution.macro.assignedTo,

@@ -75,7 +75,7 @@ export default function AssistantDashboard() {
         <div className="card" style={{ marginBottom: '2rem', borderTop: `4px solid ${isReassigned(activeTask) ? 'var(--color-danger)' : 'var(--color-primary)'}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--color-border)' }}>
             <div>
-              <h2 style={{ margin: 0 }}>{activeTask.blueprintId.name}</h2>
+              <h2 style={{ margin: 0 }}>{activeTask.blueprintId?.name || 'Custom Sample Analysis'}</h2>
               <p style={{ color: 'var(--color-text-muted)', margin: '0.2rem 0 0 0', fontSize: '0.9rem' }}>Test Code: {activeTask.testCode}</p>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -173,7 +173,7 @@ export default function AssistantDashboard() {
                 </div>
                 
                 <div>
-                  <h3 style={{ margin: '0 0 0.3rem 0', color: 'var(--color-primary-dark)' }}>{task.blueprintId.name}</h3>
+                  <h3 style={{ margin: '0 0 0.3rem 0', color: 'var(--color-primary-dark)' }}>{task.blueprintId?.name || 'Custom Sample Analysis'}</h3>
                   <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', display: 'flex', justifyContent: 'space-between' }}>
                     <span>Code: {task.testCode}</span>
                     <span>Params: {task.results.length}</span>

@@ -436,18 +436,16 @@ function Blueprints() {
 
 function Dispatcher() {
   const [assistants, setAssistants] = useState([]);
-  const [blueprints, setBlueprints] = useState([]);
   const [jobs, setJobs] = useState([]);
   const { user } = useContext(AuthContext);
 
   const [formData, setFormData] = useState({
-    blueprintId: '', jobId: '', deadline: '', assignedTo: ''
+    jobId: '', deadline: '', assignedTo: ''
   });
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
     axios.get('http://localhost:5000/api/users').then(res => setAssistants(res.data)).catch(console.error);
-    axios.get('http://localhost:5000/api/tests/blueprints').then(res => setBlueprints(res.data)).catch(console.error);
 
     // Fetch Jobs assigned to this head
     axios.get('http://localhost:5000/api/jobs').then(res => {
@@ -462,7 +460,7 @@ function Dispatcher() {
     try {
       await axios.post('http://localhost:5000/api/tests/instances', formData);
       setSuccess('Job dispatched successfully!');
-      setFormData({ blueprintId: '', jobId: '', deadline: '', assignedTo: '' });
+      setFormData({ jobId: '', deadline: '', assignedTo: '' });
       setTimeout(() => setSuccess(''), 4000);
 
       // refresh jobs
@@ -472,6 +470,7 @@ function Dispatcher() {
       });
     } catch (err) {
       console.error(err);
+      alert('Error: ' + (err.response?.data?.message || err.message));
     }
   };
 
@@ -498,13 +497,6 @@ function Dispatcher() {
             </select>
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Master Schema</label>
-            <select value={formData.blueprintId} onChange={e => setFormData({ ...formData, blueprintId: e.target.value })} required>
-              <option value="" disabled>--- Select a Schema ---</option>
-              {blueprints.map(bp => <option key={bp._id} value={bp._id}>{bp.name} ({bp.parameters.length} params)</option>)}
-            </select>
-          </div>
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Global Deadline</label>

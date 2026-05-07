@@ -6,7 +6,7 @@ const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
 const Notification = require('../models/Notification');
-const { createNotification, notifyLabHeads } = require('../utils/notifier');
+const { createNotification, notifyLabHeads, notifyAdmins } = require('../utils/notifier');
 
 // --- BLUEPRINTS ---
 
@@ -80,37 +80,50 @@ router.get('/instances', protect, async (req, res) => {
 // Head dispatches a test to an assistant
 router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
   try {
-    const { blueprintId, jobId, deadline, assignedTo } = req.body;
+    const { jobId, deadline, assignedTo, blueprintId } = req.body;
 
     const job = await Job.findById(jobId);
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
     const testCode = '#UL-' + Math.floor(1000 + Math.random() * 9000) + 'X';
 
-    const blueprint = await TestBlueprint.findById(blueprintId);
-    if (!blueprint) return res.status(404).json({ message: 'Blueprint not found' });
-
-    const initialResults = blueprint.parameters.map(p => ({
-      parameterId: p._id,
-      name: p.name,
-      value: '',
-      unit: p.unit,
-      referenceRange: p.referenceRange
-    }));
+    // Build initial results from job's test_parameters (set by LAB_HEAD)
+    let initialResults = [];
+    if (job.sample && job.sample.test_parameters && job.sample.test_parameters.length > 0) {
+      initialResults = job.sample.test_parameters.map((paramName, idx) => ({
+        parameterId: idx.toString(),
+        name: paramName,
+        value: '',
+        unit: '',
+        referenceRange: ''
+      }));
+    } else if (blueprintId) {
+      // Fallback to blueprint for legacy jobs
+      const blueprint = await TestBlueprint.findById(blueprintId);
+      if (blueprint) {
+        initialResults = blueprint.parameters.map(p => ({
+          parameterId: p._id,
+          name: p.name,
+          value: '',
+          unit: p.unit,
+          referenceRange: p.referenceRange
+        }));
+      }
+    }
 
     const dept = req.user.department ? req.user.department.toLowerCase() : 'micro';
+    const clientName = (job.customer && job.customer.customer_name) || job.clientName || '';
 
     const instance = await TestInstance.create({
       jobId,
-      blueprintId,
+      blueprintId: blueprintId || undefined,
       testCode,
-      clientName: job.clientName,
+      clientName: clientName,
       deadline,
       assignedTo,
       results: initialResults,
       createdBy: req.user._id,
-      // Link to parent instance if this is a reopened job
-      ...(job.distribution[dept]?.reopenInfo?.parentInstanceId ? {
+      ...(job.distribution[dept] && job.distribution[dept].reopenInfo && job.distribution[dept].reopenInfo.parentInstanceId ? {
         version: (job.distribution[dept].reopenInfo.parentVersion || 0) + 1,
         parentInstanceId: job.distribution[dept].reopenInfo.parentInstanceId
       } : {})

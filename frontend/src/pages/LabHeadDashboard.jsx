@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
 import ReportViewer from '../components/ReportViewer';
 import { AuthContext } from '../context/AuthContext';
@@ -352,15 +352,41 @@ function UsersPage() {
   );
 }
 
+const BLANK_FORM = {
+  // Customer
+  customer_name: '', customer_address: '', contact_person: '',
+  mobile_number: '', email: '', customer_reference_no: '',
+  // Sample
+  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: 'ml',
+  sample_quantity_custom_unit: '', sample_description: '', condition_on_receipt: '',
+  packing_details: '', marking_seal: '', sample_source: '',
+  received_date: '', received_mode: '', sampling_details: '',
+  test_parameters: [], test_param_input: '',
+  // Compliance
+  statement_of_conformity: '', decision_rule: '', accreditation_scope: '',
+  disclaimer_notes: '', special_handling_instructions: '',
+  // Distribution
+  microRequired: false, microVolume: '', microAssignedTo: '',
+  macroRequired: false, macroVolume: '', macroAssignedTo: ''
+};
+
 function Jobs() {
   const [jobs, setJobs] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [heads, setHeads] = useState([]);
-  const [formData, setFormData] = useState({
-    clientName: '', totalSampleVolume: '',
-    microRequired: false, microVolume: '', microAssignedTo: '',
-    macroRequired: false, macroVolume: '', macroAssignedTo: ''
-  });
+  const [formData, setFormData] = useState({ ...BLANK_FORM });
+  const [sections, setSections] = useState({ customer: true, sample: false, compliance: false });
+
+  const toggleSection = (s) => setSections(prev => ({ ...prev, [s]: !prev[s] }));
+  const setField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
+
+  const addTestParam = () => {
+    const v = formData.test_param_input.trim();
+    if (v && !formData.test_parameters.includes(v)) {
+      setFormData(prev => ({ ...prev, test_parameters: [...prev.test_parameters, v], test_param_input: '' }));
+    }
+  };
+  const removeTestParam = (p) => setFormData(prev => ({ ...prev, test_parameters: prev.test_parameters.filter(x => x !== p) }));
 
   const fetchJobs = async () => {
     try {
@@ -421,30 +447,44 @@ function Jobs() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const distribution = {
-        micro: {
-          required: formData.microRequired,
-          volume: formData.microVolume ? parseFloat(formData.microVolume) : 0,
-          assignedTo: formData.microAssignedTo || undefined
-        },
-        macro: {
-          required: formData.macroRequired,
-          volume: formData.macroVolume ? parseFloat(formData.macroVolume) : 0,
-          assignedTo: formData.macroAssignedTo || undefined
-        }
-      };
-
+      const unit = formData.sample_quantity_unit === 'custom' ? formData.sample_quantity_custom_unit : formData.sample_quantity_unit;
       await axios.post('http://localhost:5000/api/jobs', {
-        clientName: formData.clientName,
-        totalSampleVolume: parseFloat(formData.totalSampleVolume),
-        distribution
+        customer: {
+          customer_name: formData.customer_name,
+          customer_address: formData.customer_address,
+          contact_person: formData.contact_person,
+          mobile_number: formData.mobile_number,
+          email: formData.email,
+          customer_reference_no: formData.customer_reference_no
+        },
+        sample: {
+          sample_name: formData.sample_name,
+          sample_id: formData.sample_id,
+          sample_quantity: `${formData.sample_quantity} ${unit}`.trim(),
+          sample_description: formData.sample_description,
+          condition_on_receipt: formData.condition_on_receipt,
+          packing_details: formData.packing_details,
+          marking_seal: formData.marking_seal,
+          sample_source: formData.sample_source,
+          received_date: formData.received_date,
+          received_mode: formData.received_mode,
+          sampling_details: formData.sampling_details,
+          test_parameters: formData.test_parameters
+        },
+        compliance: {
+          statement_of_conformity: formData.statement_of_conformity,
+          decision_rule: formData.decision_rule,
+          accreditation_scope: formData.accreditation_scope,
+          disclaimer_notes: formData.disclaimer_notes,
+          special_handling_instructions: formData.special_handling_instructions
+        },
+        distribution: {
+          micro: { required: formData.microRequired, volume: parseFloat(formData.microVolume) || 0, assignedTo: formData.microAssignedTo || undefined },
+          macro: { required: formData.macroRequired, volume: parseFloat(formData.macroVolume) || 0, assignedTo: formData.macroAssignedTo || undefined }
+        }
       });
       setShowForm(false);
-      setFormData({
-        clientName: '', totalSampleVolume: '',
-        microRequired: false, microVolume: '', microAssignedTo: '',
-        macroRequired: false, macroVolume: '', macroAssignedTo: ''
-      });
+      setFormData({ ...BLANK_FORM });
       fetchJobs();
     } catch (err) {
       console.error(err);
@@ -464,38 +504,121 @@ function Jobs() {
       {showForm && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h3 style={{ marginBottom: '1.5rem' }}>Log New Sample & Distribute</h3>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Client Name</label>
-                <input type="text" value={formData.clientName} onChange={e => setFormData({ ...formData, clientName: e.target.value })} required />
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            {/* ── CUSTOMER INFORMATION ── */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div onClick={() => toggleSection('customer')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.customer ? 'var(--color-surface-hover)' : 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {sections.customer ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <span style={{ fontWeight: 600 }}>Customer Information</span>
+                </div>
+                <span className="badge badge-primary" style={{ fontSize: '0.75rem' }}>Required</span>
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Total Sample Volume (ml/g)</label>
-                <input type="number" step="0.01" value={formData.totalSampleVolume} onChange={e => handleTotalChange(e.target.value)} required />
-              </div>
+              {sections.customer && (
+                <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.customer_name} onChange={e => setField('customer_name', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Mobile Number <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.mobile_number} onChange={e => setField('mobile_number', e.target.value)} required /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Address <span style={{color:'var(--color-danger)'}}>*</span></label><textarea rows={2} value={formData.customer_address} onChange={e => setField('customer_address', e.target.value)} required style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Contact Person <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.contact_person} onChange={e => setField('contact_person', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Email <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="email" value={formData.email} onChange={e => setField('email', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Reference No. <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.customer_reference_no} onChange={e => setField('customer_reference_no', e.target.value)} /></div>
+                </div>
+              )}
             </div>
 
+            {/* ── SAMPLE INFORMATION ── */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div onClick={() => toggleSection('sample')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.sample ? 'var(--color-surface-hover)' : 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {sections.sample ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <span style={{ fontWeight: 600 }}>Sample Information</span>
+                </div>
+                <span className="badge badge-primary" style={{ fontSize: '0.75rem' }}>Required</span>
+              </div>
+              {sections.sample && (
+                <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.sample_name} onChange={e => setField('sample_name', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample ID <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.sample_id} onChange={e => setField('sample_id', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Quantity <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input type="number" step="0.01" value={formData.sample_quantity} onChange={e => setField('sample_quantity', e.target.value)} required style={{ flex: 1 }} />
+                      <select value={formData.sample_quantity_unit} onChange={e => setField('sample_quantity_unit', e.target.value)} style={{ width: '90px' }}>
+                        <option value="ml">ml</option>
+                        <option value="L">L</option>
+                        <option value="g">g</option>
+                        <option value="kg">kg</option>
+                        <option value="mg">mg</option>
+                        <option value="custom">Custom...</option>
+                      </select>
+                    </div>
+                    {formData.sample_quantity_unit === 'custom' && (
+                      <input placeholder="Enter unit" value={formData.sample_quantity_custom_unit} onChange={e => setField('sample_quantity_custom_unit', e.target.value)} required style={{ marginTop: '0.5rem' }} />
+                    )}
+                  </div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Date <span style={{color:'var(--color-danger)'}}>*</span></label><input type="date" value={formData.received_date} onChange={e => setField('received_date', e.target.value)} required /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Description <span style={{color:'var(--color-danger)'}}>*</span></label><textarea rows={2} value={formData.sample_description} onChange={e => setField('sample_description', e.target.value)} required style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Condition on Receipt <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.condition_on_receipt} onChange={e => setField('condition_on_receipt', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Packing Details</label><input value={formData.packing_details} onChange={e => setField('packing_details', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Marking / Seal</label><input value={formData.marking_seal} onChange={e => setField('marking_seal', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Source</label><input value={formData.sample_source} onChange={e => setField('sample_source', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Mode</label>
+                    <select value={formData.received_mode} onChange={e => setField('received_mode', e.target.value)}>
+                      <option value="">Select...</option>
+                      <option>Courier</option><option>Hand Delivery</option><option>Post</option><option>Other</option>
+                    </select>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sampling Details</label><textarea rows={2} value={formData.sampling_details} onChange={e => setField('sampling_details', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Test Parameters <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <input placeholder="Type a parameter and press Enter" value={formData.test_param_input} onChange={e => setField('test_param_input', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTestParam(); }}} style={{ flex: 1 }} />
+                      <button type="button" className="btn" onClick={addTestParam} style={{ padding: '0.4rem 0.8rem' }}>Add</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                      {formData.test_parameters.map(p => (
+                        <span key={p} style={{ backgroundColor: 'var(--color-primary)', color: 'white', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                          {p} <span onClick={() => removeTestParam(p)} style={{ cursor: 'pointer', opacity: 0.8 }}>×</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── COMPLIANCE & LEGAL ── */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div onClick={() => toggleSection('compliance')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.compliance ? 'var(--color-surface-hover)' : 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {sections.compliance ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <span style={{ fontWeight: 600 }}>Compliance & Legal Information</span>
+                </div>
+                <span className="badge badge-secondary" style={{ fontSize: '0.75rem' }}>Important</span>
+              </div>
+              {sections.compliance && (
+                <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Statement of Conformity</label><textarea rows={2} value={formData.statement_of_conformity} onChange={e => setField('statement_of_conformity', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Accreditation Scope</label><input value={formData.accreditation_scope} onChange={e => setField('accreditation_scope', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Disclaimer Notes</label><textarea rows={2} value={formData.disclaimer_notes} onChange={e => setField('disclaimer_notes', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Decision Rule <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.decision_rule} onChange={e => setField('decision_rule', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Special Handling Instructions <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><textarea rows={2} value={formData.special_handling_instructions} onChange={e => setField('special_handling_instructions', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                </div>
+              )}
+            </div>
+
+            {/* ── DEPARTMENT DISTRIBUTION (unchanged) ── */}
             <div style={{ display: 'flex', gap: '1.5rem' }}>
-              {/* MICRO SECTION */}
-              <div 
-                className={`selectable-card ${formData.microRequired ? 'selected' : ''}`}
-                onClick={() => setFormData(prev => ({ ...prev, microRequired: !prev.microRequired }))}
-                style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
-              >
+              <div className={`selectable-card ${formData.microRequired ? 'selected' : ''}`} onClick={() => setFormData(prev => ({ ...prev, microRequired: !prev.microRequired }))} style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
                 <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span>Distribute to MICRO</span>
                   {formData.microRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
                 </div>
                 {formData.microRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Micro Volume</label>
-                      <input type="number" step="0.01" value={formData.microVolume} onChange={e => handleMicroChange(e.target.value)} required />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
-                      <select value={formData.microAssignedTo} onChange={e => setFormData({ ...formData, microAssignedTo: e.target.value })} required>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Micro Volume</label><input type="number" step="0.01" value={formData.microVolume} onChange={e => setField('microVolume', e.target.value)} required /></div>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
+                      <select value={formData.microAssignedTo} onChange={e => setField('microAssignedTo', e.target.value)} required>
                         <option value="">Select Head...</option>
                         {heads.filter(h => h.department === 'Micro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
                       </select>
@@ -503,26 +626,16 @@ function Jobs() {
                   </div>
                 )}
               </div>
-
-              {/* CHEMICAL SECTION */}
-              <div 
-                className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`}
-                onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))}
-                style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
-              >
+              <div className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`} onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))} style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
                 <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span>Distribute to CHEMICAL</span>
                   {formData.macroRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
                 </div>
                 {formData.macroRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Chemical Volume</label>
-                      <input type="number" step="0.01" value={formData.macroVolume} onChange={e => handleMacroChange(e.target.value)} required />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
-                      <select value={formData.macroAssignedTo} onChange={e => setFormData({ ...formData, macroAssignedTo: e.target.value })} required>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Chemical Volume</label><input type="number" step="0.01" value={formData.macroVolume} onChange={e => setField('macroVolume', e.target.value)} required /></div>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
+                      <select value={formData.macroAssignedTo} onChange={e => setField('macroAssignedTo', e.target.value)} required>
                         <option value="">Select Head...</option>
                         {heads.filter(h => h.department === 'Macro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
                       </select>
@@ -1004,10 +1117,10 @@ function LabReviewQueue() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '1rem' }}>
-                      <button onClick={() => handleApprove(inst._id)} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
+                      <button onClick={(e) => { e.stopPropagation(); handleApprove(inst._id); }} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
                         <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Generate Report
                       </button>
-                      <button onClick={() => setShowReassignForm(inst._id)} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
+                      <button onClick={(e) => { e.stopPropagation(); setShowReassignForm(inst._id); }} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
                         <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign to Analyst
                       </button>
                     </div>
