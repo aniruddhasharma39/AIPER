@@ -26,6 +26,8 @@ mongoose.connect(process.env.MONGODB_URI)
     console.log('Connected to MongoDB Atlas');
     app.listen(process.env.PORT, () => {
       console.log(`Server running on port ${process.env.PORT}`);
+      // Drop legacy unique index on sampleSerial if it exists (allows retests to share serial)
+      mongoose.connection.db.collection('jobs').dropIndex('sampleSerial_1').catch(() => {});
     });
   })
   .catch(err => console.error('MongoDB connection error:', err));

@@ -6,7 +6,8 @@ const resultParameterSchema = new mongoose.Schema({
   value: { type: String }, // filled by assistant
   unit: { type: String },
   referenceRange: { type: String },
-  isSaved: { type: Boolean, default: false }
+  isSaved: { type: Boolean, default: false },
+  testMethod: { type: String, default: '' } // test standard / method used by analyst
 });
 
 const reviewEntrySchema = new mongoose.Schema({
@@ -34,6 +35,10 @@ const testInstanceSchema = new mongoose.Schema({
   reviewHistory: [reviewEntrySchema],        // full audit trail of approvals/rejections
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   completedAt: { type: Date },
+  testingPeriod: {
+    startDate: { type: Date },
+    endDate: { type: Date }
+  },
 
   // Future-proofing for job reopening: when a completed job is reopened,
   // a new TestInstance is created with version+1 and parentInstanceId pointing

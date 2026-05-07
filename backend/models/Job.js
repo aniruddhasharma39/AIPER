@@ -1,7 +1,11 @@
 const mongoose = require('mongoose');
 
 const jobSchema = new mongoose.Schema({
+  // jobCode = YYMMDD + NNNN  e.g. "2605070001"  (10 digits, globally unique)
   jobCode: { type: String, required: true, unique: true },
+  // sampleSerial = the 4-digit numeric part, e.g. 1001
+  sampleSerial: { type: Number, required: true },
+
   // Legacy field — kept for backward compat, auto-populated from customer.customer_name on create
   clientName: { type: String },
   totalSampleVolume: { type: Number },
@@ -69,7 +73,13 @@ const jobSchema = new mongoose.Schema({
       }
     }
   },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  
+  // Retest/Reopen Fields
+  isRetest: { type: Boolean, default: false },
+  parentJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job', default: null },
+  reopenReason: { type: String, default: null },
+  retestNumber: { type: Number, default: 0 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Job', jobSchema);

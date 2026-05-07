@@ -21,14 +21,21 @@ router.get('/', protect, async (req, res) => {
 router.post('/', protect, async (req, res) => {
   try {
     const { name, type, unit } = req.body;
-    
-    // Check if exists
-    const existing = await Parameter.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
-    if (existing) {
-      return res.status(400).json({ message: 'Parameter with this name already exists' });
+    if (!name || !type || !unit) {
+      return res.status(400).json({ message: 'name, type, and unit are all required' });
     }
 
-    const parameter = await Parameter.create({ name, type, unit });
+    // Check if exists
+    const existing = await Parameter.findOne({ name: { $regex: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+    if (existing) {
+      return res.status(400).json({ message: `Parameter "${name}" already exists in the library` });
+    }
+
+    // Assign s_no manually to avoid pre-save race conditions
+    const last = await Parameter.findOne({}, {}, { sort: { s_no: -1 } });
+    const s_no = (last && last.s_no) ? last.s_no + 1 : 1;
+
+    const parameter = await Parameter.create({ name: name.trim(), type, unit: unit.trim(), s_no });
     res.status(201).json(parameter);
   } catch (err) {
     res.status(500).json({ message: 'Error creating parameter', error: err.message });

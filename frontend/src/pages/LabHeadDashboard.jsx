@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Routes, Route, Link } from 'react-router-dom';
+import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, Calendar } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, X, Calendar } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
 import ReportViewer from '../components/ReportViewer';
 import { AuthContext } from '../context/AuthContext';
 import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
 import Spinner from '../components/Spinner';
+
 function Dashboard() {
   const { user } = useContext(AuthContext);
   const [stats, setStats] = useState({
@@ -409,7 +410,7 @@ const BLANK_FORM = {
   customer_name: '', customer_address: '', contact_person: '',
   mobile_number: '', email: '', customer_reference_no: '',
   // Sample
-  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: '',
+  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: 'ml',
   sample_description: '', condition_on_receipt: '',
   packing_details: '', marking_seal: '', sample_source: '',
   received_date_dd: '', received_date_mm: '', received_date_yyyy: '', received_mode: 'Select', nabl_type: '', ulr_no: '',
@@ -422,13 +423,28 @@ const BLANK_FORM = {
   macroRequired: false, macroVolume: '', macroAssignedTo: ''
 };
 
+// Helper: same format as backend buildJobCode — YYMMDD + 4-digit padded serial
+function buildJobCodePreview(serial) {
+  if (!serial) return '…';
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const nn = String(serial).padStart(4, '0');
+  return `${yy}${mm}${dd}${nn}`;
+}
+
 function Jobs() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [heads, setHeads] = useState([]);
-  const [formData, setFormData] = useState({ ...BLANK_FORM });
+  const [formData, setFormData] = useState({ ...BLANK_FORM, reopenReason: '' });
   const [sections, setSections] = useState({ customer: true, sample: false, compliance: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [nextSerial, setNextSerial] = useState(null); // 4-digit auto-increment serial
+  const [reopenParentId, setReopenParentId] = useState(null);
 
   const toggleSection = (s) => setSections(prev => ({ ...prev, [s]: !prev[s] }));
   const setField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
@@ -461,98 +477,87 @@ function Jobs() {
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { fetchJobs(); fetchHeads(); }, []);
-
-  const handleTotalChange = (val) => {
-    const total = parseFloat(val);
-    setFormData(prev => {
-      let next = { ...prev, totalSampleVolume: val };
-      if (!isNaN(total)) {
-        if (prev.microRequired && !prev.macroRequired) next.microVolume = total;
-        else if (prev.macroRequired && !prev.microRequired) next.macroVolume = total;
-        else if (prev.microRequired && prev.macroRequired && prev.microVolume !== '') {
-          const m = parseFloat(prev.microVolume);
-          if (!isNaN(m)) next.macroVolume = total - m;
-        }
+  const fetchNextSerial = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/jobs/next-sample-id');
+      setNextSerial(res.data);
+      if (!reopenParentId) {
+        setFormData(prev => ({ ...prev, sample_id: res.data.padded }));
       }
-      return next;
-    });
+    } catch (err) { console.error('Could not fetch next sample ID', err); }
   };
 
-  const handleMicroChange = (val) => {
-    const micro = parseFloat(val);
-    const total = parseFloat(formData.totalSampleVolume);
-    setFormData(prev => {
-      let next = { ...prev, microVolume: val };
-      if (prev.macroRequired && !isNaN(total) && !isNaN(micro)) {
-        next.macroVolume = total - micro;
-      }
-      return next;
-    });
-  };
+  useEffect(() => { 
+    fetchJobs(); 
+    fetchHeads(); 
+    fetchNextSerial(); 
+  }, []);
 
-  const handleMacroChange = (val) => {
-    const macro = parseFloat(val);
-    const total = parseFloat(formData.totalSampleVolume);
-    setFormData(prev => {
-      let next = { ...prev, macroVolume: val };
-      if (prev.microRequired && !isNaN(total) && !isNaN(macro)) {
-        next.microVolume = total - macro;
-      }
-      return next;
-    });
-  };
-
-  const handleFormKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      if (e.target.tagName === 'TEXTAREA') return;
-      if (e.target.tagName === 'BUTTON') return;
-      if (e.target.name === 'test_param_input') return;
-
-      e.preventDefault();
-      
-      const form = e.currentTarget;
-      const elements = Array.from(form.elements).filter(
-        el => !el.disabled && 
-              el.tabIndex !== -1 && 
-              el.type !== 'hidden' && 
-              el.tagName !== 'BUTTON' && 
-              el.tagName !== 'SELECT' && 
-              el.name !== 'test_param_input'
-      );
-      
-      const index = elements.indexOf(e.target);
-      if (index > -1 && index < elements.length - 1) {
-        elements[index + 1].focus();
-      }
+  // Handle incoming Reopen request from JobLogTable
+  useEffect(() => {
+    if (location.state?.reopenJob) {
+      const j = location.state.reopenJob;
+      setFormData({
+        ...BLANK_FORM,
+        customer_name: j.clientName || '',
+        customer_address: j.customer?.customer_address || '',
+        contact_person: j.customer?.contact_person || '',
+        mobile_number: j.customer?.mobile_number || '',
+        email: j.customer?.email || '',
+        customer_reference_no: j.customer?.customer_reference_no || '',
+        sample_name: j.sample?.sample_name || '',
+        sample_id: j.sample?.sample_id || '',
+        sample_quantity: j.sample?.sample_quantity?.split(' ')[0] || '',
+        sample_quantity_unit: j.sample?.sample_quantity?.split(' ')[1] || 'ml',
+        sample_description: j.sample?.sample_description || '',
+        condition_on_receipt: j.sample?.condition_on_receipt || '',
+        packing_details: j.sample?.packing_details || '',
+        marking_seal: j.sample?.marking_seal || '',
+        sample_source: j.sample?.sample_source || '',
+        received_date_dd: j.sample?.received_date ? new Date(j.sample.received_date).getDate().toString().padStart(2, '0') : '',
+        received_date_mm: j.sample?.received_date ? (new Date(j.sample.received_date).getMonth() + 1).toString().padStart(2, '0') : '',
+        received_date_yyyy: j.sample?.received_date ? new Date(j.sample.received_date).getFullYear().toString() : '',
+        received_mode: j.sample?.received_mode || 'Select',
+        nabl_type: j.sample?.nabl_type || '',
+        ulr_no: j.sample?.ulr_no || '',
+        test_parameters: j.sample?.test_parameters || [],
+        statement_of_conformity: j.compliance?.statement_of_conformity || '',
+        decision_rule: j.compliance?.decision_rule || '',
+        accreditation_scope: j.compliance?.accreditation_scope || '',
+        disclaimer_notes: j.compliance?.disclaimer_notes || '',
+        special_handling_instructions: j.compliance?.special_handling_instructions || '',
+        reopenReason: ''
+      });
+      setReopenParentId(j._id);
+      setShowForm(true);
+      setSections({ customer: true, sample: true, compliance: true });
+      window.history.replaceState({}, document.title);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  };
+  }, [location.state]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // HTML5 native validation
     if (!e.currentTarget.checkValidity()) {
       e.currentTarget.reportValidity();
       return;
     }
-    
-    // Custom validation for tests
     if (formData.test_parameters.length === 0) {
       alert("Please add at least one Test Required before submitting.");
+      return;
+    }
+    if (reopenParentId && !formData.reopenReason?.trim()) {
+      alert('Reason for reopening is required');
       return;
     }
 
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const unit = formData.sample_quantity_unit;
-      
       const { received_date_dd, received_date_mm, received_date_yyyy } = formData;
       const dInt = parseInt(received_date_dd, 10);
       const mInt = parseInt(received_date_mm, 10);
       const yInt = parseInt(received_date_yyyy, 10);
-      
       const dateObj = new Date(yInt, mInt - 1, dInt);
       if (dateObj.getFullYear() !== yInt || dateObj.getMonth() !== mInt - 1 || dateObj.getDate() !== dInt) {
          alert("Please enter a strictly valid Received Date.");
@@ -561,7 +566,6 @@ function Jobs() {
       }
       const parsedDate = `${yInt}-${String(mInt).padStart(2, '0')}-${String(dInt).padStart(2, '0')}`;
       
-      // Auto-select first available head if no option was actively changed (since we removed the empty "Select..." option)
       let finalMicroAssignedTo = formData.microAssignedTo;
       if (formData.microRequired && !finalMicroAssignedTo) {
         const microHeads = heads.filter(h => h.department === 'Micro');
@@ -574,7 +578,7 @@ function Jobs() {
         if (macroHeads.length > 0) finalMacroAssignedTo = macroHeads[0]._id;
       }
 
-      await axios.post('http://localhost:5000/api/jobs', {
+      const payload = {
         customer: {
           customer_name: formData.customer_name,
           customer_address: formData.customer_address,
@@ -586,7 +590,7 @@ function Jobs() {
         sample: {
           sample_name: formData.sample_name,
           sample_id: formData.sample_id,
-          sample_quantity: `${formData.sample_quantity} ${unit}`.trim(),
+          sample_quantity: `${formData.sample_quantity} ${formData.sample_quantity_unit}`.trim(),
           sample_description: formData.sample_description,
           condition_on_receipt: formData.condition_on_receipt,
           packing_details: formData.packing_details,
@@ -609,14 +613,24 @@ function Jobs() {
           micro: { required: formData.microRequired, volume: parseFloat(formData.microVolume) || 0, assignedTo: finalMicroAssignedTo || undefined },
           macro: { required: formData.macroRequired, volume: parseFloat(formData.macroVolume) || 0, assignedTo: finalMacroAssignedTo || undefined }
         }
-      });
+      };
+
+      if (reopenParentId) {
+        payload.reopenReason = formData.reopenReason;
+        await axios.post(`http://localhost:5000/api/jobs/${reopenParentId}/retest`, payload);
+      } else {
+        await axios.post('http://localhost:5000/api/jobs', payload);
+      }
+
       setShowForm(false);
-      setFormData({ ...BLANK_FORM });
+      setFormData({ ...BLANK_FORM, reopenReason: '' });
+      setReopenParentId(null);
       invalidateCache(CACHE_KEYS.JOBS);
       fetchJobs();
+      fetchNextSerial();
     } catch (err) {
       console.error(err);
-      alert('Error creating job');
+      alert('Error saving job: ' + (err.response?.data?.message || err.message));
     } finally {
       setIsSubmitting(false);
     }
@@ -638,17 +652,44 @@ function Jobs() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Activity size={28} style={{ color: 'var(--color-primary)' }}/> Job Distributor</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Close Form' : '+ New job'}
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Activity size={28} style={{ color: 'var(--color-primary)' }}/> 
+          {reopenParentId ? 'Retest / Reopen Job' : 'Job Distributor'}
+        </h1>
+        <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); if(showForm) setReopenParentId(null); }}>
+          {showForm ? 'Close Form' : '+ New Client Sample Job'}
         </button>
       </div>
 
       {showForm && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <h3 style={{ marginBottom: '1.5rem' }}>Log New Sample & Distribute</h3>
-          <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} noValidate>
-
+        <div className="card" style={{ marginBottom: '2rem', overflow: 'visible', border: reopenParentId ? '2px solid var(--color-warning)' : 'none' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <h3 style={{ margin: 0, color: reopenParentId ? 'var(--color-warning)' : 'inherit' }}>
+              {reopenParentId ? 'Log Sample Retest' : 'Log New Sample & Distribute'}
+            </h3>
+            {reopenParentId && (
+              <div style={{ padding: '1rem', backgroundColor: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 'var(--radius-md)', marginBottom: '1rem', width: '100%' }}>
+                <label style={{ display: 'block', fontWeight: 600, color: '#b45309', marginBottom: '0.5rem' }}>Reason for Reopening / Retest <span style={{ color: 'red' }}>*</span></label>
+                <textarea 
+                  value={formData.reopenReason} 
+                  onChange={e => setField('reopenReason', e.target.value)} 
+                  required 
+                  placeholder="Explain why this job is being retested..." 
+                  style={{ width: '100%', resize: 'vertical', minHeight: '60px', borderColor: '#fcd34d' }} 
+                />
+              </div>
+            )}
+            {!reopenParentId && nextSerial && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.2rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Next Job Code</span>
+                <span style={{ fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--color-primary)', backgroundColor: 'var(--color-surface-hover)', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                  {buildJobCodePreview(nextSerial.serial)}
+                </span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Micro: …-1 &nbsp;|&nbsp; Chemical: …-2</span>
+              </div>
+            )}
+          </div>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {/* ── CUSTOMER INFORMATION ── */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div onClick={() => toggleSection('customer')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.customer ? 'var(--color-surface-hover)' : 'transparent' }}>
@@ -663,9 +704,9 @@ function Jobs() {
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.customer_name} onChange={e => setField('customer_name', e.target.value)} required /></div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Mobile Number <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.mobile_number} onChange={e => setField('mobile_number', e.target.value)} required /></div>
                   <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Address <span style={{color:'var(--color-danger)'}}>*</span></label><input type="text" value={formData.customer_address} onChange={e => setField('customer_address', e.target.value)} required style={{ width: '100%' }} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Contact Person <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.contact_person} onChange={e => setField('contact_person', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Email <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="email" value={formData.email} onChange={e => setField('email', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Reference No. <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.customer_reference_no} onChange={e => setField('customer_reference_no', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Contact Person</label><input value={formData.contact_person} onChange={e => setField('contact_person', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Email</label><input type="email" value={formData.email} onChange={e => setField('email', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Reference No.</label><input value={formData.customer_reference_no} onChange={e => setField('customer_reference_no', e.target.value)} /></div>
                 </div>
               )}
             </div>
@@ -682,7 +723,16 @@ function Jobs() {
               {sections.sample && (
                 <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.sample_name} onChange={e => setField('sample_name', e.target.value)} required /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample ID <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.sample_id} onChange={e => setField('sample_id', e.target.value)} required /></div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample ID <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(auto-assigned)</span></label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <input
+                        value={formData.sample_id || (nextSerial ? nextSerial.padded : '')}
+                        readOnly
+                        style={{ flex: 1, backgroundColor: 'var(--color-surface-hover)', cursor: 'not-allowed', fontFamily: 'monospace', fontWeight: 600, letterSpacing: '0.1em', color: 'var(--color-primary)' }}
+                      />
+                    </div>
+                  </div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Quantity <span style={{color:'var(--color-danger)'}}>*</span></label>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <input type="number" step="0.01" value={formData.sample_quantity} onChange={e => setField('sample_quantity', e.target.value)} required style={{ flex: 1 }} />
@@ -708,12 +758,6 @@ function Jobs() {
                             setField('received_date_yyyy', y);
                           }}
                           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
-                          onClick={e => { 
-                            e.stopPropagation();
-                            if (navigator.userAgent.indexOf("Firefox") === -1) {
-                              try { if (e.target.showPicker) e.target.showPicker(); } catch (err) {} 
-                            }
-                          }}
                         />
                       </div>
                     </div>
@@ -726,10 +770,10 @@ function Jobs() {
                       <option value="Unsatisfactory">Unsatisfactory</option>
                     </select>
                   </div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Packing Details <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.packing_details} onChange={e => setField('packing_details', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Marking / Seal <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.marking_seal} onChange={e => setField('marking_seal', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Source <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.sample_source} onChange={e => setField('sample_source', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Mode <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Packing Details</label><input value={formData.packing_details} onChange={e => setField('packing_details', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Marking / Seal</label><input value={formData.marking_seal} onChange={e => setField('marking_seal', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Source</label><input value={formData.sample_source} onChange={e => setField('sample_source', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Mode</label>
                     <select value={formData.received_mode} onChange={e => setField('received_mode', e.target.value)}>
                       <option value="Select">Select...</option>
                       <option>Courier</option><option>Hand Delivery</option><option>Post</option><option>Other</option>
@@ -748,13 +792,13 @@ function Jobs() {
                   <div style={{ gridColumn: '1 / -1' }}>
                     <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Tests Required <span style={{color:'var(--color-danger)'}}>*</span></label>
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.8rem' }}>
-                      <input name="test_param_input" placeholder="Type a parameter and press Enter" value={formData.test_param_input} onChange={e => setField('test_param_input', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTestParam(); }}} style={{ flex: 1, padding: '0.75rem', fontSize: '1rem' }} />
-                      <button type="button" className="btn btn-primary" onClick={addTestParam} style={{ padding: '0 1.5rem' }}>Add</button>
+                      <input name="test_param_input" placeholder="Type a parameter and press Enter" value={formData.test_param_input} onChange={e => setField('test_param_input', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTestParam(); }}} style={{ flex: 1 }} />
+                      <button type="button" className="btn btn-primary" onClick={addTestParam}>Add</button>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
                       {formData.test_parameters.map(p => (
-                        <span key={p} style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-md)', fontSize: '1rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #7dd3fc' }}>
-                          {p} <span onClick={() => removeTestParam(p)} style={{ cursor: 'pointer', opacity: 0.7, padding: '0 0.2rem' }}>×</span>
+                        <span key={p} className="badge badge-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {p} <X size={12} style={{ cursor: 'pointer' }} onClick={() => removeTestParam(p)} />
                         </span>
                       ))}
                     </div>
@@ -774,16 +818,15 @@ function Jobs() {
               </div>
               {sections.compliance && (
                 <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Statement of Conformity <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><textarea rows={2} value={formData.statement_of_conformity} onChange={e => setField('statement_of_conformity', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Accreditation Scope <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><input value={formData.accreditation_scope} onChange={e => setField('accreditation_scope', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Disclaimer Notes <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><textarea rows={2} value={formData.disclaimer_notes} onChange={e => setField('disclaimer_notes', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Decision Rule <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><input value={formData.decision_rule} onChange={e => setField('decision_rule', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Special Handling Instructions <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><textarea rows={2} value={formData.special_handling_instructions} onChange={e => setField('special_handling_instructions', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Statement of Conformity</label><textarea rows={2} value={formData.statement_of_conformity} onChange={e => setField('statement_of_conformity', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Accreditation Scope</label><input value={formData.accreditation_scope} onChange={e => setField('accreditation_scope', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Disclaimer Notes</label><textarea rows={2} value={formData.disclaimer_notes} onChange={e => setField('disclaimer_notes', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Decision Rule</label><input value={formData.decision_rule} onChange={e => setField('decision_rule', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Special Handling Instructions</label><textarea rows={2} value={formData.special_handling_instructions} onChange={e => setField('special_handling_instructions', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
                 </div>
               )}
             </div>
 
-            {/* ── DEPARTMENT DISTRIBUTION (unchanged) ── */}
             <div style={{ display: 'flex', gap: '1.5rem' }}>
               <div className={`selectable-card ${formData.microRequired ? 'selected' : ''}`} onClick={() => setFormData(prev => ({ ...prev, microRequired: !prev.microRequired }))} style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
                 <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -792,7 +835,7 @@ function Jobs() {
                 </div>
                 {formData.microRequired && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="number" step="0.01" value={formData.microVolume} onChange={e => setField('microVolume', e.target.value)} /></div>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity</label><input type="number" step="0.01" value={formData.microVolume} onChange={e => setField('microVolume', e.target.value)} /></div>
                     <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head <span style={{color:'var(--color-danger)'}}>*</span></label>
                       <select value={formData.microAssignedTo} onChange={e => setField('microAssignedTo', e.target.value)} required>
                         {heads.filter(h => h.department === 'Micro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
@@ -808,7 +851,7 @@ function Jobs() {
                 </div>
                 {formData.macroRequired && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="number" step="0.01" value={formData.macroVolume} onChange={e => setField('macroVolume', e.target.value)} /></div>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity</label><input type="number" step="0.01" value={formData.macroVolume} onChange={e => setField('macroVolume', e.target.value)} /></div>
                     <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head <span style={{color:'var(--color-danger)'}}>*</span></label>
                       <select value={formData.macroAssignedTo} onChange={e => setField('macroAssignedTo', e.target.value)} required>
                         {heads.filter(h => h.department === 'Macro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
@@ -820,161 +863,33 @@ function Jobs() {
             </div>
 
             <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={(!formData.microRequired && !formData.macroRequired) || isSubmitting}>
-              {isSubmitting ? 'Creating job...' : 'Create job'}
+              {isSubmitting ? 'Processing...' : (reopenParentId ? 'Submit Retest' : 'Create Job')}
             </button>
           </form>
         </div>
       )}
 
       <div style={{ marginTop: '2rem' }}>
-        <JobLogTable jobs={jobs} title="All Client Sample Jobs" onDeleteJob={handleDeleteJob} />
+        <JobLogTable 
+          jobs={jobs} 
+          title="All Client Sample Jobs" 
+          onDeleteJob={handleDeleteJob}
+          onReopen={(job) => navigate('/lab-head/jobs', { state: { reopenJob: job } })}
+        />
       </div>
     </div>
   );
 }
-
-// Blueprint UI can be very similar to Domain Head
-function Blueprints() {
-  const [blueprints, setBlueprints] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ name: '', department: 'Micro', parameters: [{ name: '', unit: '', referenceRange: '' }] });
-
-  const fetchBlueprints = async () => {
-    try {
-      const res = await axios.get('http://localhost:5000/api/tests/blueprints');
-      setBlueprints(res.data);
-    } catch(err) { console.error(err); }
-  };
-
-  useEffect(() => { fetchBlueprints(); }, []);
-
-  const addParam = () => setFormData(p => ({ ...p, parameters: [...p.parameters, { name: '', unit: '', referenceRange: '' }] }));
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (formData.parameters.length === 0) return alert('At least one parameter is required');
-    try {
-      await axios.post('http://localhost:5000/api/tests/blueprints', formData);
-      setShowForm(false);
-      setFormData({ name: '', department: 'Micro', parameters: [{ name: '', unit: '', referenceRange: '' }] });
-      fetchBlueprints();
-    } catch (err) { alert('Error creating blueprint'); }
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h1>Test Blueprints</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>{showForm ? 'Close' : '+ New Blueprint'}</button>
-      </div>
-
-      {showForm && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
-          <h3>Create Test Blueprint</h3>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <input style={{ flex: 2 }} type="text" placeholder="Blueprint Name (e.g. Complete Blood Count)" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} required />
-              <select style={{ flex: 1 }} value={formData.department} onChange={e => setFormData(p => ({ ...p, department: e.target.value }))}>
-                <option value="Micro">Micro</option>
-                <option value="Macro">Chemical</option>
-              </select>
-            </div>
-            <h4>Parameters</h4>
-            {formData.parameters.map((p, i) => (
-              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input style={{ flex: 2 }} type="text" placeholder="Parameter Name" value={p.name} onChange={e => { const newParams = [...formData.parameters]; newParams[i].name = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
-                <input style={{ flex: 1 }} type="text" placeholder="Unit" value={p.unit} onChange={e => { const newParams = [...formData.parameters]; newParams[i].unit = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
-                <input style={{ flex: 1 }} type="text" placeholder="Range" value={p.referenceRange} onChange={e => { const newParams = [...formData.parameters]; newParams[i].referenceRange = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
-                {formData.parameters.length > 1 && (
-                  <button type="button" onClick={() => setFormData(prev => ({ ...prev, parameters: prev.parameters.filter((_, idx) => idx !== i) }))} style={{ border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0 0.5rem' }}>
-                    <Trash2 size={20} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-              <button type="button" onClick={addParam} className="btn" style={{ border: '1px solid var(--color-border)', alignSelf: 'flex-start' }}>+ Add Parameter</button>
-              <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>Save Blueprint</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table>
-          <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-            <tr><th>Name</th><th>Department</th><th>Parameters count</th></tr>
-          </thead>
-          <tbody>
-            {blueprints.map(b => (
-              <tr key={b._id}>
-                <td style={{ fontWeight: 500 }}>{b.name}</td>
-                <td>{b.department}</td>
-                <td>{b.parameters.length} params</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 
 function Audit() {
-  const [instances, setInstances] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [selectedReport, setSelectedReport] = useState(null);
-  const [reopenTarget, setReopenTarget] = useState(null);
-  const [reopenNote, setReopenNote] = useState('');
-  const [reopenHeadId, setReopenHeadId] = useState('');
-  const [heads, setHeads] = useState([]);
-  const [success, setSuccess] = useState('');
-  const [historyTarget, setHistoryTarget] = useState(null);
-  const [versionHistory, setVersionHistory] = useState([]);
-  const [auditLoading, setAuditLoading] = useState(
-    () => !sessionStorage.getItem(CACHE_KEYS.INSTANCES) || !sessionStorage.getItem(CACHE_KEYS.JOBS)
-  );
+  const [auditLoading, setAuditLoading] = useState(true);
+  const navigate = useNavigate();
 
   const fetchData = async () => {
     try {
-      let allInstances, allJobs, allUsers;
-
-      // Instant render from cache for all 3 datasets
-      const cachedInstances = sessionStorage.getItem(CACHE_KEYS.INSTANCES);
-      const cachedJobs = sessionStorage.getItem(CACHE_KEYS.JOBS);
-      const cachedUsers = sessionStorage.getItem(CACHE_KEYS.USERS);
-
-      const processData = (instances, jobs, users) => {
-        const isJobAuditReady = (job) => {
-          const jobInsts = instances.filter(i => i.jobId === job._id);
-          const microOk = !job.distribution?.micro?.required ||
-            job.distribution.micro.status === 'COMPLETED' ||
-            jobInsts.some(i => (i.status === 'COMPLETED' || i.status === 'REOPENED') && i.createdBy?.department?.toUpperCase() === 'MICRO');
-          const macroOk = !job.distribution?.macro?.required ||
-            job.distribution.macro.status === 'COMPLETED' ||
-            jobInsts.some(i => (i.status === 'COMPLETED' || i.status === 'REOPENED') && i.createdBy?.department?.toUpperCase() === 'MACRO');
-          return microOk && macroOk;
-        };
-        const auditReadyJobIds = new Set(jobs.filter(j => isJobAuditReady(j)).map(j => j._id));
-        setInstances(instances.filter(i => (i.status === 'COMPLETED' || i.status === 'REOPENED') && auditReadyJobIds.has(i.jobId)));
-        setJobs(jobs);
-        setHeads(users.filter(u => u.role === 'HEAD'));
-      };
-
-      if (cachedInstances && cachedJobs && cachedUsers) {
-        processData(JSON.parse(cachedInstances), JSON.parse(cachedJobs), JSON.parse(cachedUsers));
-      }
-
-      const [resInst, resJobs, resUsers] = await Promise.all([
-        axios.get('http://localhost:5000/api/tests/instances'),
-        axios.get('http://localhost:5000/api/jobs'),
-        axios.get('http://localhost:5000/api/users')
-      ]);
-      sessionStorage.setItem(CACHE_KEYS.INSTANCES, JSON.stringify(resInst.data));
-      sessionStorage.setItem(CACHE_KEYS.JOBS, JSON.stringify(resJobs.data));
-      sessionStorage.setItem(CACHE_KEYS.USERS, JSON.stringify(resUsers.data));
-      processData(resInst.data, resJobs.data, resUsers.data);
+      const resJobs = await axios.get('http://localhost:5000/api/jobs');
+      setJobs(resJobs.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -984,198 +899,20 @@ function Audit() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const handleReopen = async () => {
-    if (!reopenNote.trim()) return;
-    try {
-      await axios.post(`http://localhost:5000/api/tests/instances/${reopenTarget._id}/reopen`, {
-        reopenNote,
-        assignedHeadId: reopenHeadId || undefined
-      });
-      setSuccess('Job reopened successfully. The HEAD will re-dispatch it.');
-      setReopenTarget(null);
-      setReopenNote('');
-      setReopenHeadId('');
-      invalidateCache(CACHE_KEYS.INSTANCES, CACHE_KEYS.JOBS);
-      fetchData();
-      setTimeout(() => setSuccess(''), 4000);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchHistory = async (instanceId) => {
-    try {
-      const res = await axios.get(`http://localhost:5000/api/tests/instances/${instanceId}/history`);
-      setVersionHistory(res.data);
-      setHistoryTarget(instanceId);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  if (selectedReport) {
-    return <ReportViewer report={selectedReport} onBack={() => setSelectedReport(null)} />;
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       <div>
         <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <FileText size={28} style={{ color: 'var(--color-primary)' }} /> Global Job Logs
+          <FileText size={28} style={{ color: 'var(--color-primary)' }} /> Global Job Logs & Reports
         </h1>
-        <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
-      </div>
-
-      {success && (
-        <div style={{ 
-          position: 'fixed', 
-          top: '6rem', 
-          right: '2rem', 
-          zIndex: 1000,
-          color: 'white', 
-          backgroundColor: 'var(--color-success)', 
-          padding: '1rem 1.5rem', 
-          borderRadius: 'var(--radius-md)',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          animation: 'slideIn 0.3s ease-out'
-        }}>
-          <CheckCircle size={20} />
-          <span style={{ fontWeight: 500 }}>{success}</span>
-        </div>
-      )}
-
-      {/* Reopen Modal */}
-      {reopenTarget && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '2rem' }}>
-            <h2 style={{ marginBottom: '0.5rem' }}>Reopen Job</h2>
-            <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-              Test: <strong>{reopenTarget.testCode}</strong> — {reopenTarget.blueprintId?.name}
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reason for Reopening *</label>
-                <textarea
-                  value={reopenNote}
-                  onChange={e => setReopenNote(e.target.value)}
-                  placeholder="e.g. Client requested additional pH testing..."
-                  style={{ width: '100%', minHeight: '80px', padding: '0.75rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', resize: 'vertical', fontFamily: 'inherit' }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reassign to HEAD (optional)</label>
-                <select value={reopenHeadId} onChange={e => setReopenHeadId(e.target.value)} style={{ width: '100%' }}>
-                  <option value="">Keep current HEAD</option>
-                  {heads.filter(h => h.department?.toUpperCase() === reopenTarget.createdBy?.department?.toUpperCase()).map(h => <option key={h._id} value={h._id}>{h.name} ({h.department === 'Macro' || h.department === 'macro' ? 'Chemical' : h.department})</option>)}
-                </select>
-              </div>
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-                <button onClick={handleReopen} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }} disabled={!reopenNote.trim()}>
-                  <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reopen Job
-                </button>
-                <button onClick={() => { setReopenTarget(null); setReopenNote(''); setReopenHeadId(''); }} className="btn" style={{ flex: 1, justifyContent: 'center', border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Cancel</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Version History Panel */}
-      {historyTarget && versionHistory.length > 0 && (
-        <div className="card" style={{ borderLeft: '4px solid var(--color-primary)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0 }}>Version History</h3>
-            <button onClick={() => { setHistoryTarget(null); setVersionHistory([]); }} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem', border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Close</button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {versionHistory.map(v => (
-              <div key={v._id} style={{ padding: '1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>v{v.version}</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{v.testCode}</span>
-                    <span className={`badge ${v.status === 'COMPLETED' ? 'badge-success' : v.status === 'REOPENED' ? 'badge-warning' : ''}`} style={{ fontSize: '0.7rem' }}>{v.status}</span>
-                  </div>
-                  {v.status === 'COMPLETED' && (
-                    <button onClick={() => setSelectedReport(v)} className="btn btn-primary" style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}>View PDF</button>
-                  )}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                  Blueprint: {v.blueprintId?.name} · Analyst: {v.assignedTo?.name}
-                  {v.completedAt && ` · Completed: ${new Date(v.completedAt).toLocaleDateString()}`}
-                </div>
-                {v.reopenNote && (
-                  <div style={{ fontSize: '0.8rem', color: 'var(--color-warning)', marginTop: '0.3rem', fontStyle: 'italic' }}>
-                    Reopen reason: "{v.reopenNote}"
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div>
-        <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          PDF Reports & Completed Audit
-        </h2>
-        <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
-          <table>
-            <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-              <tr>
-                <th>Test Code</th>
-                <th>Client Name</th>
-                <th>Blueprint</th>
-                <th>Department</th>
-                <th>Status</th>
-                <th>Date Completed</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditLoading && instances.length === 0 ? (
-                <tr><td colSpan="7"><Spinner message="Loading audit records..." /></td></tr>
-              ) : instances.length === 0 ? (
-                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests yet.</td></tr>
-              ) : (
-                instances.map(inst => (
-                  <tr key={inst._id} style={{ opacity: inst.status === 'REOPENED' ? 0.6 : 1 }}>
-                    <td style={{ fontFamily: 'monospace' }}>{inst.testCode}</td>
-                    <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
-                    <td>{inst.blueprintId?.name}</td>
-                    <td style={{ fontWeight: 500, fontSize: '0.85rem' }}>
-                      {inst.createdBy?.department?.toUpperCase() === 'MACRO' ? 'CHEMICAL' : inst.createdBy?.department?.toUpperCase() || '—'}
-                    </td>
-                    <td>
-                      {inst.status === 'COMPLETED' ? (
-                        <span className="badge badge-success">Completed</span>
-                      ) : (
-                        <span className="badge badge-warning">Reopened</span>
-                      )}
-                    </td>
-                    <td>{inst.completedAt ? new Date(inst.completedAt).toLocaleDateString() : '—'}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        {inst.status === 'COMPLETED' && (
-                          <>
-                            <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
-                            <button onClick={() => setReopenTarget(inst)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>Reopen</button>
-                          </>
-                        )}
-                        {(inst.version > 1 || inst.status === 'REOPENED') && (
-                          <button onClick={() => fetchHistory(inst._id)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem', border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>History</button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>
+          Expand a job row to view its complete telemetry, retest cycles, and download final reports.
+        </p>
+        <JobLogTable
+          jobs={jobs}
+          title="Lifecycle Tracker"
+          onReopen={(job) => navigate('/lab-head/jobs', { state: { reopenJob: job } })}
+        />
       </div>
     </div>
   );
@@ -1187,15 +924,13 @@ function LabReviewQueue() {
   const [reassignNote, setReassignNote] = useState('');
   const [showReassignForm, setShowReassignForm] = useState(null);
   const [success, setSuccess] = useState('');
-  const [reviewLoading, setReviewLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.INSTANCES));
+  const [reviewLoading, setReviewLoading] = useState(true);
+  const [selectedPreview, setSelectedPreview] = useState(null);
 
   const fetchReviewItems = async () => {
     try {
-      await fetchWithCache(
-        'http://localhost:5000/api/tests/instances',
-        CACHE_KEYS.INSTANCES,
-        (data) => setInstances(data.filter(i => i.status === 'PENDING_LAB_HEAD_REVIEW'))
-      );
+      const res = await axios.get('http://localhost:5000/api/tests/instances');
+      setInstances(res.data.filter(i => i.status === 'PENDING_LAB_HEAD_REVIEW'));
     } catch (err) {
       console.error(err);
     } finally {
@@ -1208,7 +943,7 @@ function LabReviewQueue() {
   const handleApprove = async (id) => {
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${id}/lab-review`, { action: 'APPROVE' });
-      setSuccess('Approved! Report has been generated and job marked as completed.');
+      setSuccess('Approved! Report has been generated.');
       invalidateCache(CACHE_KEYS.INSTANCES);
       fetchReviewItems();
       setSelectedInstance(null);
@@ -1236,27 +971,24 @@ function LabReviewQueue() {
     }
   };
 
+  if (selectedPreview) {
+    return <ReportViewer report={selectedPreview} onBack={() => setSelectedPreview(null)} />;
+  }
+
   return (
     <div>
       <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <ClipboardCheck size={28} style={{ color: 'var(--color-primary)' }} /> Final Review Queue
       </h1>
-      <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>These submissions have been approved by the Department Head. Review and approve to generate the final report.</p>
+      <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>Review submissions approved by Department Heads before final report generation.</p>
 
       {success && (
         <div style={{ 
-          position: 'fixed', 
-          top: '6rem', 
-          right: '2rem', 
-          zIndex: 1000,
-          color: 'white', 
-          backgroundColor: 'var(--color-success)', 
-          padding: '1rem 1.5rem', 
-          borderRadius: 'var(--radius-md)',
+          position: 'fixed', top: '6rem', right: '2rem', zIndex: 1000,
+          color: 'white', backgroundColor: 'var(--color-success)', 
+          padding: '1rem 1.5rem', borderRadius: 'var(--radius-md)',
           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
+          display: 'flex', alignItems: 'center', gap: '0.75rem',
           animation: 'slideIn 0.3s ease-out'
         }}>
           <CheckCircle size={20} />
@@ -1264,96 +996,79 @@ function LabReviewQueue() {
         </div>
       )}
 
-      {reviewLoading && instances.length === 0 ? (
-        <div className="card">
-          <Spinner message="Loading review queue..." />
-        </div>
+      {reviewLoading ? (
+        <div className="card"><Spinner message="Loading review queue..." /></div>
       ) : instances.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
-          No submissions awaiting your final review.
-        </div>
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>No submissions awaiting your final review.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {instances.map(inst => (
             <div key={inst._id} className="card" style={{ borderLeft: '4px solid var(--color-primary)', padding: 0, overflow: 'hidden' }}>
-              {/* Header */}
               <div style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', cursor: 'pointer', backgroundColor: selectedInstance === inst._id ? 'var(--color-surface-hover)' : 'transparent' }}
                 onClick={() => setSelectedInstance(selectedInstance === inst._id ? null : inst._id)}
               >
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{inst.blueprintId?.name}</div>
+                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{inst.blueprintId?.name || inst.testCode}</div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
                     Code: <span style={{ fontFamily: 'monospace' }}>{inst.testCode}</span> · Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
                   </div>
                 </div>
-                <span className="badge badge-primary">HEAD Approved — Awaiting Final Review</span>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                   <button onClick={(e) => { e.stopPropagation(); setSelectedPreview(inst); }} className="btn btn-sm" style={{ backgroundColor: 'var(--color-surface-hover)', border: '1px solid var(--color-border)', color: 'var(--color-text-main)' }}>
+                     <FileText size={14} style={{ marginRight: '0.4rem' }} /> Preview Report
+                   </button>
+                   <span className="badge badge-primary">Awaiting Final Approval</span>
+                </div>
               </div>
 
-              {/* Expanded detail */}
               {selectedInstance === inst._id && (
                 <div style={{ padding: '1.5rem' }}>
-                  {/* Review history */}
-                  {inst.reviewHistory && inst.reviewHistory.length > 0 && (
-                    <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'rgba(64, 158, 255, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-primary)' }}>
-                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.85rem', color: 'var(--color-primary)' }}>Review History</div>
-                      {inst.reviewHistory.map((rh, i) => (
-                        <div key={i} style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '0.3rem' }}>
-                          <strong>{rh.role}</strong> — {rh.action} {rh.note && `("${rh.note}")`} — {new Date(rh.date).toLocaleString()}
-                        </div>
-                      ))}
+                  {inst.testingPeriod?.startDate && (
+                    <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
+                      <strong>Testing Period:</strong> {new Date(inst.testingPeriod.startDate).toLocaleDateString('en-IN')} to {new Date(inst.testingPeriod.endDate).toLocaleDateString('en-IN')}
                     </div>
                   )}
 
-                  {/* Results table */}
-                  <h4 style={{ marginBottom: '0.75rem' }}>Submitted Results</h4>
                   <table style={{ marginBottom: '1.5rem' }}>
                     <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
                       <tr>
                         <th>Parameter</th>
                         <th>Value</th>
                         <th>Unit</th>
+                        <th>Test Method</th>
                         <th>Reference Range</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {inst.results.map(r => (
-                        <tr key={r.parameterId}>
+                      {inst.results.map((r, i) => (
+                        <tr key={i}>
                           <td style={{ fontWeight: 500 }}>{r.name}</td>
-                          <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{r.value || '—'}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--color-primary)' }}>{r.value}</td>
                           <td>{r.unit}</td>
+                          <td>{r.testMethod || <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>N/A</span>}</td>
                           <td style={{ color: 'var(--color-text-muted)' }}>{r.referenceRange}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
 
-                  {/* Actions */}
-                  {showReassignForm === inst._id ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      <div>
-                        <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reason for Reassignment</label>
-                        <textarea
-                          value={reassignNote}
-                          onChange={e => setReassignNote(e.target.value)}
-                          placeholder="Describe what needs to be corrected..."
-                          style={{ width: '100%', minHeight: '80px', padding: '0.75rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', resize: 'vertical', fontFamily: 'inherit' }}
-                        />
-                      </div>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button onClick={() => handleApprove(inst._id)} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
+                      <CheckCircle size={18} style={{ marginRight: '0.5rem' }} /> Approve & Complete
+                    </button>
+                    <button onClick={() => setShowReassignForm(inst._id)} className="btn btn-danger" style={{ flex: 1, justifyContent: 'center' }}>
+                      <RotateCcw size={18} style={{ marginRight: '0.5rem' }} /> Send Back
+                    </button>
+                  </div>
+
+                  {showReassignForm === inst._id && (
+                    <div style={{ marginTop: '1.5rem', padding: '1.5rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-danger)' }}>
+                      <h4 style={{ color: 'var(--color-danger)', marginBottom: '1rem' }}>Reassignment Instructions</h4>
+                      <textarea value={reassignNote} onChange={e => setReassignNote(e.target.value)} placeholder="Provide specific instructions on what needs to be corrected..." style={{ width: '100%', minHeight: '100px', marginBottom: '1rem' }} />
                       <div style={{ display: 'flex', gap: '1rem' }}>
-                        <button onClick={() => handleReassign(inst._id)} className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white', border: 'none' }}>
-                          <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Confirm Reassignment
-                        </button>
-                        <button onClick={() => { setShowReassignForm(null); setReassignNote(''); }} className="btn" style={{ border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Cancel</button>
+                        <button onClick={() => handleReassign(inst._id)} className="btn btn-danger" disabled={!reassignNote.trim()}>Confirm Send Back</button>
+                        <button onClick={() => { setShowReassignForm(null); setReassignNote(''); }} className="btn" style={{ border: '1px solid var(--color-border)' }}>Cancel</button>
                       </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', gap: '1rem' }}>
-                      <button onClick={(e) => { e.stopPropagation(); handleApprove(inst._id); }} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
-                        <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Generate Report
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); setShowReassignForm(inst._id); }} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
-                        <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign to Analyst
-                      </button>
                     </div>
                   )}
                 </div>
@@ -1367,14 +1082,38 @@ function LabReviewQueue() {
 }
 
 export default function LabHeadDashboard() {
+  const { user } = useContext(AuthContext);
   return (
-    <Routes>
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/review" element={<LabReviewQueue />} />
-      <Route path="/jobs" element={<Jobs />} />
-      <Route path="/blueprints" element={<Blueprints />} />
-      <Route path="/users" element={<UsersPage />} />
-      <Route path="/audit" element={<Audit />} />
-    </Routes>
+    <div className="dashboard-layout">
+      <nav className="sidebar">
+        <div className="sidebar-header" style={{ padding: '1.5rem', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <div style={{ width: '32px', height: '32px', background: 'linear-gradient(135deg, var(--color-primary), #3b82f6)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+              <Activity size={18} />
+            </div>
+            <span style={{ fontWeight: 800, fontSize: '1.2rem', letterSpacing: '-0.02em', color: 'var(--color-text-main)' }}>LAB HEAD</span>
+          </div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0 }}>{user?.email}</p>
+        </div>
+        <div className="sidebar-content" style={{ padding: '1rem' }}>
+          <Link to="/lab-head" className="nav-link"><Activity size={18} /> Dashboard</Link>
+          <Link to="/lab-head/jobs" className="nav-link"><Clock size={18} /> Job Distributor</Link>
+          <Link to="/lab-head/review" className="nav-link"><ClipboardCheck size={18} /> Review Queue</Link>
+          <Link to="/lab-head/audit" className="nav-link"><FileText size={18} /> Audit Logs</Link>
+          <Link to="/lab-head/users" className="nav-link"><UsersIcon size={18} /> User Management</Link>
+          <Link to="/lab-head/settings" className="nav-link"><Settings size={18} /> System Settings</Link>
+        </div>
+      </nav>
+      <main className="dashboard-main" style={{ padding: '2.5rem' }}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/jobs" element={<Jobs />} />
+          <Route path="/review" element={<LabReviewQueue />} />
+          <Route path="/audit" element={<Audit />} />
+          <Route path="/users" element={<UsersPage />} />
+          <Route path="/settings" element={<div>System Settings Page</div>} />
+        </Routes>
+      </main>
+    </div>
   );
 }

@@ -658,6 +658,13 @@ function ReviewQueue() {
                     </div>
                   )}
 
+                  {/* Testing Period */}
+                  {inst.testingPeriod && inst.testingPeriod.startDate && (
+                    <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
+                      <strong>Testing Period:</strong> {new Date(inst.testingPeriod.startDate).toLocaleDateString('en-IN')} to {new Date(inst.testingPeriod.endDate).toLocaleDateString('en-IN')}
+                    </div>
+                  )}
+
                   {/* Results table */}
                   <h4 style={{ marginBottom: '0.75rem' }}>Submitted Results</h4>
                   <table style={{ marginBottom: '1.5rem' }}>
@@ -666,6 +673,7 @@ function ReviewQueue() {
                         <th>Parameter</th>
                         <th>Value</th>
                         <th>Unit</th>
+                        <th>Test Method</th>
                         <th>Reference Range</th>
                       </tr>
                     </thead>
@@ -675,6 +683,7 @@ function ReviewQueue() {
                           <td style={{ fontWeight: 500 }}>{r.name}</td>
                           <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{r.value || '—'}</td>
                           <td>{r.unit}</td>
+                          <td style={{ fontSize: '0.85rem' }}>{r.testMethod || '—'}</td>
                           <td style={{ color: 'var(--color-text-muted)' }}>{r.referenceRange}</td>
                         </tr>
                       ))}
@@ -725,7 +734,6 @@ export default function HeadDashboard() {
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/assistants" element={<Assistants />} />
-      <Route path="/blueprints" element={<Blueprints />} />
       <Route path="/dispatcher" element={<Dispatcher />} />
       <Route path="/review" element={<ReviewQueue />} />
       <Route path="/audit" element={<Audit />} />

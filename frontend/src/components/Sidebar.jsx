@@ -20,7 +20,6 @@ export default function Sidebar() {
           { to: '/lab-head', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
           { to: '/lab-head/review', icon: <ClipboardCheck size={20} />, label: 'Review Queue' },
           { to: '/lab-head/jobs', icon: <Activity size={20} />, label: 'Job Distributor' },
-          { to: '/lab-head/blueprints', icon: <Settings size={20} />, label: 'Test Blueprints' },
           { to: '/lab-head/users', icon: <Users size={20} />, label: 'User Management' },
           { to: '/lab-head/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
         ];
@@ -29,7 +28,6 @@ export default function Sidebar() {
           { to: '/head', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
           { to: '/head/review', icon: <ClipboardCheck size={20} />, label: 'Review Queue' },
           { to: '/head/assistants', icon: <Users size={20} />, label: 'Assistants' },
-          { to: '/head/blueprints', icon: <Settings size={20} />, label: 'Test Blueprints' },
           { to: '/head/dispatcher', icon: <Activity size={20} />, label: 'Job Dispatcher' },
           { to: '/head/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
         ];

@@ -55,11 +55,14 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
     const job = await Job.findById(jobId);
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
-    // Not needed for parameter-based flow anymore, but keeping placeholder
-    // just in case any legacy flow reaches here
-    const testCode = '#UL-' + Math.floor(1000 + Math.random() * 9000) + 'X';
     const dept = req.user.department ? req.user.department.toLowerCase() : 'micro';
     const clientName = (job.customer && job.customer.customer_name) || job.clientName || '';
+
+    // Child test code convention:
+    //   Micro dept  → {jobCode}-1   e.g. 2605070001-1
+    //   Chemical/Macro dept → {jobCode}-2   e.g. 2605070001-2
+    const deptSuffix = (dept === 'micro') ? '1' : '2';
+    const baseTestCode = `${job.jobCode}-${deptSuffix}`;
 
     // Group assignments by assignedTo (assistant ID)
     const assistantMap = {};
@@ -74,25 +77,37 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
           name: assignment.name,
           value: '',
           unit: assignment.unit,
-          referenceRange: '' // Deprecated or manually set later
+          referenceRange: ''
         });
+      });
     }
 
     const createdInstances = [];
+    const assistantIds = Object.keys(assistantMap);
 
-    for (const [astId, params] of Object.entries(assistantMap)) {
-      const testCode = '#UL-' + Math.floor(1000 + Math.random() * 9000) + 'X';
-      
+    for (let i = 0; i < assistantIds.length; i++) {
+      const astId = assistantIds[i];
+      const params = assistantMap[astId];
+
+      // If multiple assistants under the same department, differentiate with a letter suffix
+      // e.g. 2605070001-1a, 2605070001-1b
+      const suffix = assistantIds.length > 1
+        ? `${baseTestCode}${String.fromCharCode(97 + i)}` // a, b, c…
+        : baseTestCode;
+
+      // Check for duplicate testCode (in case of re-dispatch after reopen)
+      const existingCount = await TestInstance.countDocuments({ testCode: { $regex: `^${suffix.replace(/-/g, '\\-')}` } });
+      const testCode = existingCount > 0 ? `${suffix}-v${existingCount + 1}` : suffix;
+
       const instance = await TestInstance.create({
         jobId,
         testCode,
-        clientName: job.clientName,
+        clientName,
         deadline,
         assignedTo: astId,
         results: params,
         createdBy: req.user._id,
-        // Link to parent instance if this is a reopened job
-        ...(job.distribution[dept]?.reopenInfo?.parentInstanceId ? {
+        ...(job.distribution[dept] && job.distribution[dept].reopenInfo && job.distribution[dept].reopenInfo.parentInstanceId ? {
           version: (job.distribution[dept].reopenInfo.parentVersion || 0) + 1,
           parentInstanceId: job.distribution[dept].reopenInfo.parentInstanceId
         } : {})
@@ -104,16 +119,17 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
         recipient: astId,
         type: 'ACTION_REQUIRED',
         title: 'New Test Assigned',
-        message: `You have been assigned to test ${testCode} for ${job.clientName}.`,
+        message: `You have been assigned test ${testCode} for job ${job.jobCode}.`,
         relatedJobId: jobId,
         relatedInstanceId: instance._id
       });
     }
 
-    // Update job distribution status to ASSIGNED_TO_ASSISTANT and clear reopenInfo
-    if (job.distribution && job.distribution[dept]) {
-      job.distribution[dept].status = 'ASSIGNED_TO_ASSISTANT';
-      job.distribution[dept].reopenInfo = undefined;
+    // Update job distribution status
+    const distDept = (dept === 'chemical' || dept === 'macro') ? 'macro' : 'micro';
+    if (job.distribution && job.distribution[distDept]) {
+      job.distribution[distDept].status = 'ASSIGNED_TO_ASSISTANT';
+      job.distribution[distDept].reopenInfo = undefined;
       await job.save();
     }
 
@@ -152,13 +168,19 @@ router.put('/instances/:id/save-progress', protect, authorize('ASSISTANT'), asyn
 // ASSISTANT fills in results and submits for HEAD review
 router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req, res) => {
   try {
-    const { results } = req.body;
+    const { results, testingPeriod } = req.body;
     const instance = await TestInstance.findOne({ _id: req.params.id, assignedTo: req.user._id });
 
     if (!instance) return res.status(404).json({ message: 'Test not found or not assigned to you' });
     if (instance.status !== 'PENDING') return res.status(400).json({ message: 'Test is not in a submittable state' });
 
     instance.results = results;
+    if (testingPeriod) {
+      instance.testingPeriod = {
+        startDate: testingPeriod.startDate || null,
+        endDate: testingPeriod.endDate || null
+      };
+    }
     // Move to HEAD review — NOT completed yet
     instance.status = 'PENDING_HEAD_REVIEW';
     // Clear previousResults since this is a fresh submission
