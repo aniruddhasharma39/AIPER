@@ -28,7 +28,8 @@ const jobSchema = new mongoose.Schema({
     sample_source:         { type: String },
     received_date:         { type: Date, required: true },
     received_mode:         { type: String },
-    sampling_details:      { type: String },
+    nabl_type:             { type: String, enum: ['Nabl', 'Non Nabl'] },
+    ulr_no:                { type: String },
     test_parameters:       [{ type: String }]
   },
 

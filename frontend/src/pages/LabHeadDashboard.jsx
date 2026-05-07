@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, Calendar } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
 import ReportViewer from '../components/ReportViewer';
 import { AuthContext } from '../context/AuthContext';
@@ -357,10 +357,10 @@ const BLANK_FORM = {
   customer_name: '', customer_address: '', contact_person: '',
   mobile_number: '', email: '', customer_reference_no: '',
   // Sample
-  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: 'ml',
-  sample_quantity_custom_unit: '', sample_description: '', condition_on_receipt: '',
+  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: '',
+  sample_description: '', condition_on_receipt: '',
   packing_details: '', marking_seal: '', sample_source: '',
-  received_date: '', received_mode: '', sampling_details: '',
+  received_date_dd: '', received_date_mm: '', received_date_yyyy: '', received_mode: 'Select', nabl_type: '', ulr_no: '',
   test_parameters: [], test_param_input: '',
   // Compliance
   statement_of_conformity: '', decision_rule: '', accreditation_scope: '',
@@ -376,6 +376,7 @@ function Jobs() {
   const [heads, setHeads] = useState([]);
   const [formData, setFormData] = useState({ ...BLANK_FORM });
   const [sections, setSections] = useState({ customer: true, sample: false, compliance: false });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const toggleSection = (s) => setSections(prev => ({ ...prev, [s]: !prev[s] }));
   const setField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
@@ -444,10 +445,77 @@ function Jobs() {
     });
   };
 
+  const handleFormKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      if (e.target.tagName === 'TEXTAREA') return;
+      if (e.target.tagName === 'BUTTON') return;
+      if (e.target.name === 'test_param_input') return;
+
+      e.preventDefault();
+      
+      const form = e.currentTarget;
+      const elements = Array.from(form.elements).filter(
+        el => !el.disabled && 
+              el.tabIndex !== -1 && 
+              el.type !== 'hidden' && 
+              el.tagName !== 'BUTTON' && 
+              el.tagName !== 'SELECT' && 
+              el.name !== 'test_param_input'
+      );
+      
+      const index = elements.indexOf(e.target);
+      if (index > -1 && index < elements.length - 1) {
+        elements[index + 1].focus();
+      }
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // HTML5 native validation
+    if (!e.currentTarget.checkValidity()) {
+      e.currentTarget.reportValidity();
+      return;
+    }
+    
+    // Custom validation for tests
+    if (formData.test_parameters.length === 0) {
+      alert("Please add at least one Test Required before submitting.");
+      return;
+    }
+
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
-      const unit = formData.sample_quantity_unit === 'custom' ? formData.sample_quantity_custom_unit : formData.sample_quantity_unit;
+      const unit = formData.sample_quantity_unit;
+      
+      const { received_date_dd, received_date_mm, received_date_yyyy } = formData;
+      const dInt = parseInt(received_date_dd, 10);
+      const mInt = parseInt(received_date_mm, 10);
+      const yInt = parseInt(received_date_yyyy, 10);
+      
+      const dateObj = new Date(yInt, mInt - 1, dInt);
+      if (dateObj.getFullYear() !== yInt || dateObj.getMonth() !== mInt - 1 || dateObj.getDate() !== dInt) {
+         alert("Please enter a strictly valid Received Date.");
+         setIsSubmitting(false);
+         return;
+      }
+      const parsedDate = `${yInt}-${String(mInt).padStart(2, '0')}-${String(dInt).padStart(2, '0')}`;
+      
+      // Auto-select first available head if no option was actively changed (since we removed the empty "Select..." option)
+      let finalMicroAssignedTo = formData.microAssignedTo;
+      if (formData.microRequired && !finalMicroAssignedTo) {
+        const microHeads = heads.filter(h => h.department === 'Micro');
+        if (microHeads.length > 0) finalMicroAssignedTo = microHeads[0]._id;
+      }
+      
+      let finalMacroAssignedTo = formData.macroAssignedTo;
+      if (formData.macroRequired && !finalMacroAssignedTo) {
+        const macroHeads = heads.filter(h => h.department === 'Macro');
+        if (macroHeads.length > 0) finalMacroAssignedTo = macroHeads[0]._id;
+      }
+
       await axios.post('http://localhost:5000/api/jobs', {
         customer: {
           customer_name: formData.customer_name,
@@ -466,9 +534,10 @@ function Jobs() {
           packing_details: formData.packing_details,
           marking_seal: formData.marking_seal,
           sample_source: formData.sample_source,
-          received_date: formData.received_date,
-          received_mode: formData.received_mode,
-          sampling_details: formData.sampling_details,
+          received_date: parsedDate,
+          received_mode: formData.received_mode === 'Select' ? undefined : formData.received_mode,
+          nabl_type: formData.nabl_type,
+          ulr_no: formData.ulr_no,
           test_parameters: formData.test_parameters
         },
         compliance: {
@@ -479,8 +548,8 @@ function Jobs() {
           special_handling_instructions: formData.special_handling_instructions
         },
         distribution: {
-          micro: { required: formData.microRequired, volume: parseFloat(formData.microVolume) || 0, assignedTo: formData.microAssignedTo || undefined },
-          macro: { required: formData.macroRequired, volume: parseFloat(formData.macroVolume) || 0, assignedTo: formData.macroAssignedTo || undefined }
+          micro: { required: formData.microRequired, volume: parseFloat(formData.microVolume) || 0, assignedTo: finalMicroAssignedTo || undefined },
+          macro: { required: formData.macroRequired, volume: parseFloat(formData.macroVolume) || 0, assignedTo: finalMacroAssignedTo || undefined }
         }
       });
       setShowForm(false);
@@ -489,6 +558,20 @@ function Jobs() {
     } catch (err) {
       console.error(err);
       alert('Error creating job');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    const isConfirmed = window.confirm("Are you sure you want to permanently delete this job and all associated reports?");
+    if (!isConfirmed) return;
+    try {
+      await axios.delete(`http://localhost:5000/api/jobs/${jobId}`);
+      fetchJobs();
+    } catch (err) {
+      console.error(err);
+      alert('Error deleting job: ' + (err.response?.data?.message || err.message));
     }
   };
 
@@ -497,14 +580,14 @@ function Jobs() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Activity size={28} style={{ color: 'var(--color-primary)' }}/> Job Distributor</h1>
         <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Close Form' : '+ New Client Sample Job'}
+          {showForm ? 'Close Form' : '+ New job'}
         </button>
       </div>
 
       {showForm && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h3 style={{ marginBottom: '1.5rem' }}>Log New Sample & Distribute</h3>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} noValidate>
 
             {/* ── CUSTOMER INFORMATION ── */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -519,7 +602,7 @@ function Jobs() {
                 <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.customer_name} onChange={e => setField('customer_name', e.target.value)} required /></div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Mobile Number <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.mobile_number} onChange={e => setField('mobile_number', e.target.value)} required /></div>
-                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Address <span style={{color:'var(--color-danger)'}}>*</span></label><textarea rows={2} value={formData.customer_address} onChange={e => setField('customer_address', e.target.value)} required style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Address <span style={{color:'var(--color-danger)'}}>*</span></label><input type="text" value={formData.customer_address} onChange={e => setField('customer_address', e.target.value)} required style={{ width: '100%' }} /></div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Contact Person <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.contact_person} onChange={e => setField('contact_person', e.target.value)} /></div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Email <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="email" value={formData.email} onChange={e => setField('email', e.target.value)} /></div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Reference No. <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.customer_reference_no} onChange={e => setField('customer_reference_no', e.target.value)} /></div>
@@ -543,42 +626,75 @@ function Jobs() {
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Quantity <span style={{color:'var(--color-danger)'}}>*</span></label>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <input type="number" step="0.01" value={formData.sample_quantity} onChange={e => setField('sample_quantity', e.target.value)} required style={{ flex: 1 }} />
-                      <select value={formData.sample_quantity_unit} onChange={e => setField('sample_quantity_unit', e.target.value)} style={{ width: '90px' }}>
-                        <option value="ml">ml</option>
-                        <option value="L">L</option>
-                        <option value="g">g</option>
-                        <option value="kg">kg</option>
-                        <option value="mg">mg</option>
-                        <option value="custom">Custom...</option>
-                      </select>
+                      <input type="text" placeholder="Unit" value={formData.sample_quantity_unit} onChange={e => setField('sample_quantity_unit', e.target.value)} required style={{ width: '90px' }} />
                     </div>
-                    {formData.sample_quantity_unit === 'custom' && (
-                      <input placeholder="Enter unit" value={formData.sample_quantity_custom_unit} onChange={e => setField('sample_quantity_custom_unit', e.target.value)} required style={{ marginTop: '0.5rem' }} />
-                    )}
                   </div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Date <span style={{color:'var(--color-danger)'}}>*</span></label><input type="date" value={formData.received_date} onChange={e => setField('received_date', e.target.value)} required /></div>
-                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Description <span style={{color:'var(--color-danger)'}}>*</span></label><textarea rows={2} value={formData.sample_description} onChange={e => setField('sample_description', e.target.value)} required style={{ width: '100%', resize: 'vertical' }} /></div>
-                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Condition on Receipt <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.condition_on_receipt} onChange={e => setField('condition_on_receipt', e.target.value)} required /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Packing Details</label><input value={formData.packing_details} onChange={e => setField('packing_details', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Marking / Seal</label><input value={formData.marking_seal} onChange={e => setField('marking_seal', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Source</label><input value={formData.sample_source} onChange={e => setField('sample_source', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Mode</label>
-                    <select value={formData.received_mode} onChange={e => setField('received_mode', e.target.value)}>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Date <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <input type="text" placeholder="DD" maxLength="2" pattern="(0?[1-9]|[12][0-9]|3[01])" value={formData.received_date_dd} onChange={e => setField('received_date_dd', e.target.value.replace(/\D/g, ''))} required style={{ width: '3.5rem', textAlign: 'center' }} />
+                      <span style={{ fontWeight: 500, color: 'var(--color-text-muted)' }}>/</span>
+                      <input type="text" placeholder="MM" maxLength="2" pattern="(0?[1-9]|1[012])" value={formData.received_date_mm} onChange={e => setField('received_date_mm', e.target.value.replace(/\D/g, ''))} required style={{ width: '3.5rem', textAlign: 'center' }} />
+                      <span style={{ fontWeight: 500, color: 'var(--color-text-muted)' }}>/</span>
+                      <input type="text" placeholder="YYYY" maxLength="4" pattern="\d{4}" value={formData.received_date_yyyy} onChange={e => setField('received_date_yyyy', e.target.value.replace(/\D/g, ''))} required style={{ width: '4.5rem', textAlign: 'center' }} />
+                      <div style={{ position: 'relative', width: '2.8rem', height: '2.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-surface-hover)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', cursor: 'pointer' }}>
+                        <Calendar size={18} color="var(--color-text-muted)" />
+                        <input 
+                          type="date"
+                          onChange={e => {
+                            if (!e.target.value) return;
+                            const [y, m, d] = e.target.value.split('-');
+                            setField('received_date_dd', d);
+                            setField('received_date_mm', m);
+                            setField('received_date_yyyy', y);
+                          }}
+                          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                          onClick={e => { 
+                            e.stopPropagation();
+                            if (navigator.userAgent.indexOf("Firefox") === -1) {
+                              try { if (e.target.showPicker) e.target.showPicker(); } catch (err) {} 
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Description <span style={{color:'var(--color-danger)'}}>*</span></label><input type="text" value={formData.sample_description} onChange={e => setField('sample_description', e.target.value)} required style={{ width: '100%' }} /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Condition on Receipt <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <select value={formData.condition_on_receipt} onChange={e => setField('condition_on_receipt', e.target.value)} required style={{ width: '100%' }}>
                       <option value="">Select...</option>
+                      <option value="Satisfactory">Satisfactory</option>
+                      <option value="Unsatisfactory">Unsatisfactory</option>
+                    </select>
+                  </div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Packing Details <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.packing_details} onChange={e => setField('packing_details', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Marking / Seal <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.marking_seal} onChange={e => setField('marking_seal', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Source <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.sample_source} onChange={e => setField('sample_source', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Mode <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label>
+                    <select value={formData.received_mode} onChange={e => setField('received_mode', e.target.value)}>
+                      <option value="Select">Select...</option>
                       <option>Courier</option><option>Hand Delivery</option><option>Post</option><option>Other</option>
                     </select>
                   </div>
-                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sampling Details</label><textarea rows={2} value={formData.sampling_details} onChange={e => setField('sampling_details', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>NABL Type <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <select value={formData.nabl_type} onChange={e => setField('nabl_type', e.target.value)} required>
+                      <option value="">Select...</option>
+                      <option value="Non Nabl">Non Nabl</option>
+                      <option value="Nabl">Nabl</option>
+                    </select>
+                  </div>
+                  {formData.nabl_type === 'Nabl' && (
+                    <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>ULR <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.ulr_no} onChange={e => setField('ulr_no', e.target.value)} required /></div>
+                  )}
                   <div style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Test Parameters <span style={{color:'var(--color-danger)'}}>*</span></label>
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                      <input placeholder="Type a parameter and press Enter" value={formData.test_param_input} onChange={e => setField('test_param_input', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTestParam(); }}} style={{ flex: 1 }} />
-                      <button type="button" className="btn" onClick={addTestParam} style={{ padding: '0.4rem 0.8rem' }}>Add</button>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Tests Required <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.8rem' }}>
+                      <input name="test_param_input" placeholder="Type a parameter and press Enter" value={formData.test_param_input} onChange={e => setField('test_param_input', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTestParam(); }}} style={{ flex: 1, padding: '0.75rem', fontSize: '1rem' }} />
+                      <button type="button" className="btn btn-primary" onClick={addTestParam} style={{ padding: '0 1.5rem' }}>Add</button>
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
                       {formData.test_parameters.map(p => (
-                        <span key={p} style={{ backgroundColor: 'var(--color-primary)', color: 'white', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                          {p} <span onClick={() => removeTestParam(p)} style={{ cursor: 'pointer', opacity: 0.8 }}>×</span>
+                        <span key={p} style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-md)', fontSize: '1rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #7dd3fc' }}>
+                          {p} <span onClick={() => removeTestParam(p)} style={{ cursor: 'pointer', opacity: 0.7, padding: '0 0.2rem' }}>×</span>
                         </span>
                       ))}
                     </div>
@@ -598,11 +714,11 @@ function Jobs() {
               </div>
               {sections.compliance && (
                 <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Statement of Conformity</label><textarea rows={2} value={formData.statement_of_conformity} onChange={e => setField('statement_of_conformity', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Accreditation Scope</label><input value={formData.accreditation_scope} onChange={e => setField('accreditation_scope', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Disclaimer Notes</label><textarea rows={2} value={formData.disclaimer_notes} onChange={e => setField('disclaimer_notes', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Decision Rule <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.decision_rule} onChange={e => setField('decision_rule', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Special Handling Instructions <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><textarea rows={2} value={formData.special_handling_instructions} onChange={e => setField('special_handling_instructions', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Statement of Conformity <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><textarea rows={2} value={formData.statement_of_conformity} onChange={e => setField('statement_of_conformity', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Accreditation Scope <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><input value={formData.accreditation_scope} onChange={e => setField('accreditation_scope', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Disclaimer Notes <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><textarea rows={2} value={formData.disclaimer_notes} onChange={e => setField('disclaimer_notes', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Decision Rule <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><input value={formData.decision_rule} onChange={e => setField('decision_rule', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Special Handling Instructions <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(Subject to change) (optional)</span></label><textarea rows={2} value={formData.special_handling_instructions} onChange={e => setField('special_handling_instructions', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
                 </div>
               )}
             </div>
@@ -611,15 +727,14 @@ function Jobs() {
             <div style={{ display: 'flex', gap: '1.5rem' }}>
               <div className={`selectable-card ${formData.microRequired ? 'selected' : ''}`} onClick={() => setFormData(prev => ({ ...prev, microRequired: !prev.microRequired }))} style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
                 <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to MICRO</span>
+                  <span>Distribute to Micro</span>
                   {formData.microRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
                 </div>
                 {formData.microRequired && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Micro Volume</label><input type="number" step="0.01" value={formData.microVolume} onChange={e => setField('microVolume', e.target.value)} required /></div>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="number" step="0.01" value={formData.microVolume} onChange={e => setField('microVolume', e.target.value)} /></div>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head <span style={{color:'var(--color-danger)'}}>*</span></label>
                       <select value={formData.microAssignedTo} onChange={e => setField('microAssignedTo', e.target.value)} required>
-                        <option value="">Select Head...</option>
                         {heads.filter(h => h.department === 'Micro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
                       </select>
                     </div>
@@ -628,15 +743,14 @@ function Jobs() {
               </div>
               <div className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`} onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))} style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
                 <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to CHEMICAL</span>
+                  <span>Distribute to Chemical</span>
                   {formData.macroRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
                 </div>
                 {formData.macroRequired && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Chemical Volume</label><input type="number" step="0.01" value={formData.macroVolume} onChange={e => setField('macroVolume', e.target.value)} required /></div>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="number" step="0.01" value={formData.macroVolume} onChange={e => setField('macroVolume', e.target.value)} /></div>
+                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head <span style={{color:'var(--color-danger)'}}>*</span></label>
                       <select value={formData.macroAssignedTo} onChange={e => setField('macroAssignedTo', e.target.value)} required>
-                        <option value="">Select Head...</option>
                         {heads.filter(h => h.department === 'Macro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
                       </select>
                     </div>
@@ -645,15 +759,15 @@ function Jobs() {
               </div>
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={!formData.microRequired && !formData.macroRequired}>
-              Submit Job & Dispatch
+            <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={(!formData.microRequired && !formData.macroRequired) || isSubmitting}>
+              {isSubmitting ? 'Creating job...' : 'Create job'}
             </button>
           </form>
         </div>
       )}
 
       <div style={{ marginTop: '2rem' }}>
-        <JobLogTable jobs={jobs} title="All Client Sample Jobs" />
+        <JobLogTable jobs={jobs} title="All Client Sample Jobs" onDeleteJob={handleDeleteJob} />
       </div>
     </div>
   );
