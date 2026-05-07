@@ -1,40 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const TestBlueprint = require('../models/TestBlueprint');
 const TestInstance = require('../models/TestInstance');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
 const Notification = require('../models/Notification');
 const { createNotification, notifyLabHeads } = require('../utils/notifier');
-
-// --- BLUEPRINTS ---
-
-// Head creates a test blueprint
-router.post('/blueprints', protect, authorize('LAB_HEAD', 'HEAD'), async (req, res) => {
-  try {
-    const { name, department, parameters } = req.body;
-    const blueprint = await TestBlueprint.create({
-      name,
-      department,
-      parameters,
-      createdBy: req.user._id
-    });
-    res.status(201).json(blueprint);
-  } catch (err) {
-    res.status(500).json({ message: 'Error creating blueprint', error: err.message });
-  }
-});
-
-// Get all blueprints
-router.get('/blueprints', protect, authorize('ADMIN', 'LAB_HEAD', 'HEAD'), async (req, res) => {
-  try {
-    const blueprints = await TestBlueprint.find().populate('createdBy', 'name');
-    res.json(blueprints);
-  } catch (err) {
-    res.status(500).json({ message: 'Error fetching blueprints' });
-  }
-});
 
 // --- TEST INSTANCES ---
 
@@ -56,7 +27,6 @@ router.get('/instances', protect, async (req, res) => {
     // ADMIN sees all (no filter)
 
     let instances = await TestInstance.find(query)
-      .populate('blueprintId', 'name parameters')
       .populate('assignedTo', 'name')
       .populate('createdBy', 'name department')
       .populate('reviewHistory.by', 'name')
@@ -77,44 +47,63 @@ router.get('/instances', protect, async (req, res) => {
   }
 });
 
-// Head dispatches a test to an assistant
+// Head dispatches tests to assistants
 router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
   try {
-    const { blueprintId, jobId, deadline, assignedTo } = req.body;
+    const { jobId, deadline, assignments } = req.body;
 
     const job = await Job.findById(jobId);
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
-    const testCode = '#UL-' + Math.floor(1000 + Math.random() * 9000) + 'X';
-
-    const blueprint = await TestBlueprint.findById(blueprintId);
-    if (!blueprint) return res.status(404).json({ message: 'Blueprint not found' });
-
-    const initialResults = blueprint.parameters.map(p => ({
-      parameterId: p._id,
-      name: p.name,
-      value: '',
-      unit: p.unit,
-      referenceRange: p.referenceRange
-    }));
-
     const dept = req.user.department ? req.user.department.toLowerCase() : 'micro';
 
-    const instance = await TestInstance.create({
-      jobId,
-      blueprintId,
-      testCode,
-      clientName: job.clientName,
-      deadline,
-      assignedTo,
-      results: initialResults,
-      createdBy: req.user._id,
-      // Link to parent instance if this is a reopened job
-      ...(job.distribution[dept]?.reopenInfo?.parentInstanceId ? {
-        version: (job.distribution[dept].reopenInfo.parentVersion || 0) + 1,
-        parentInstanceId: job.distribution[dept].reopenInfo.parentInstanceId
-      } : {})
+    // Group assignments by assignedTo (assistant ID)
+    const assistantMap = {};
+    assignments.forEach(assignment => {
+      const astId = assignment.assignedTo;
+      if (!assistantMap[astId]) {
+        assistantMap[astId] = [];
+      }
+      assistantMap[astId].push({
+        parameterId: assignment.parameterId,
+        name: assignment.name,
+        value: '',
+        unit: assignment.unit,
+        referenceRange: '' // Deprecated or manually set later
+      });
     });
+
+    const createdInstances = [];
+
+    for (const [astId, params] of Object.entries(assistantMap)) {
+      const testCode = '#UL-' + Math.floor(1000 + Math.random() * 9000) + 'X';
+      
+      const instance = await TestInstance.create({
+        jobId,
+        testCode,
+        clientName: job.clientName,
+        deadline,
+        assignedTo: astId,
+        results: params,
+        createdBy: req.user._id,
+        // Link to parent instance if this is a reopened job
+        ...(job.distribution[dept]?.reopenInfo?.parentInstanceId ? {
+          version: (job.distribution[dept].reopenInfo.parentVersion || 0) + 1,
+          parentInstanceId: job.distribution[dept].reopenInfo.parentInstanceId
+        } : {})
+      });
+      createdInstances.push(instance);
+
+      // Notify Assistant
+      await createNotification({
+        recipient: astId,
+        type: 'ACTION_REQUIRED',
+        title: 'New Test Assigned',
+        message: `You have been assigned to test ${testCode} for ${job.clientName}.`,
+        relatedJobId: jobId,
+        relatedInstanceId: instance._id
+      });
+    }
 
     // Update job distribution status to ASSIGNED_TO_ASSISTANT and clear reopenInfo
     if (job.distribution && job.distribution[dept]) {
@@ -123,25 +112,15 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
       await job.save();
     }
 
-    // Notify Assistant
-    await createNotification({
-      recipient: assignedTo,
-      type: 'ACTION_REQUIRED',
-      title: 'New Test Assigned',
-      message: `You have been assigned to test ${testCode} for ${job.clientName}.`,
-      relatedJobId: jobId,
-      relatedInstanceId: instance._id
-    });
-
     // Notify Lab Heads
     await notifyLabHeads({
       type: 'INFO',
       title: 'Job Dispatched',
-      message: `${dept.toUpperCase()} HEAD has dispatched test ${testCode} to an analyst.`,
+      message: `${dept.toUpperCase()} HEAD has dispatched tests for job ${job.jobCode} to analysts.`,
       relatedJobId: jobId
     });
 
-    res.status(201).json(instance);
+    res.status(201).json({ message: 'Dispatched successfully', instances: createdInstances });
   } catch (err) {
     res.status(500).json({ message: 'Error creating instance', error: err.message });
   }
@@ -286,10 +265,20 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
       // Only now update job distribution status to COMPLETED
       const job = await Job.findById(instance.jobId);
       if (job) {
-        if (job.distribution.micro.required && String(job.distribution.micro.assignedTo) === String(instance.createdBy)) {
+        // Find all instances for this job
+        const allInstances = await TestInstance.find({ jobId: instance.jobId }).populate('createdBy', 'department');
+        
+        // Helper to check if all instances created by a specific department are completed
+        const isDeptCompleted = (deptName) => {
+          const deptInstances = allInstances.filter(i => i.createdBy?.department?.toLowerCase() === deptName.toLowerCase());
+          if (deptInstances.length === 0) return false;
+          return deptInstances.every(i => i.status === 'COMPLETED');
+        };
+
+        if (job.distribution.micro.required && isDeptCompleted('micro')) {
           job.distribution.micro.status = 'COMPLETED';
         }
-        if (job.distribution.macro.required && String(job.distribution.macro.assignedTo) === String(instance.createdBy)) {
+        if (job.distribution.macro.required && (isDeptCompleted('macro') || isDeptCompleted('chemical'))) {
           job.distribution.macro.status = 'COMPLETED';
         }
         await job.save();

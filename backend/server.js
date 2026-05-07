@@ -18,6 +18,7 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/tests', require('./routes/testRoutes'));
 app.use('/api/jobs', require('./routes/jobRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/parameters', require('./routes/parameterRoutes'));
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)

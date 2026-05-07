@@ -355,12 +355,12 @@ function UsersPage() {
 function Jobs() {
   const [jobs, setJobs] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [heads, setHeads] = useState([]);
-  const [formData, setFormData] = useState({
-    clientName: '', totalSampleVolume: '',
-    microRequired: false, microVolume: '', microAssignedTo: '',
-    macroRequired: false, macroVolume: '', macroAssignedTo: ''
-  });
+  const [formData, setFormData] = useState({ clientName: '' });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedParams, setSelectedParams] = useState([]);
+  const [showAddParam, setShowAddParam] = useState(false);
+  const [newParam, setNewParam] = useState({ name: '', type: 'Micro', unit: 'mg/L' });
 
   const fetchJobs = async () => {
     try {
@@ -369,82 +369,65 @@ function Jobs() {
     } catch (err) { console.error(err); }
   };
 
-  const fetchHeads = async () => {
+  useEffect(() => { fetchJobs(); }, []);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchTerm.trim()) {
+        try {
+          const res = await axios.get(`http://localhost:5000/api/parameters?search=${searchTerm}`);
+          setSearchResults(res.data);
+        } catch (err) { console.error(err); }
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
+  const handleAddExistingParam = (param) => {
+    if (!selectedParams.find(p => p._id === param._id)) {
+      setSelectedParams([...selectedParams, param]);
+    }
+    setSearchTerm('');
+    setSearchResults([]);
+  };
+
+  const handleAddNewParam = async (e) => {
+    e.preventDefault();
+    if (!newParam.name || !newParam.unit) return alert('Name and Unit are required');
     try {
-      const res = await axios.get('http://localhost:5000/api/users');
-      setHeads(res.data.filter(u => u.role === 'HEAD'));
-    } catch (err) { console.error(err); }
+      const res = await axios.post('http://localhost:5000/api/parameters', newParam);
+      setSelectedParams([...selectedParams, res.data]);
+      setShowAddParam(false);
+      setNewParam({ name: '', type: 'Micro', unit: 'mg/L' });
+      setSearchTerm('');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error adding parameter');
+    }
   };
 
-  useEffect(() => { fetchJobs(); fetchHeads(); }, []);
-
-  const handleTotalChange = (val) => {
-    const total = parseFloat(val);
-    setFormData(prev => {
-      let next = { ...prev, totalSampleVolume: val };
-      if (!isNaN(total)) {
-        if (prev.microRequired && !prev.macroRequired) next.microVolume = total;
-        else if (prev.macroRequired && !prev.microRequired) next.macroVolume = total;
-        else if (prev.microRequired && prev.macroRequired && prev.microVolume !== '') {
-          const m = parseFloat(prev.microVolume);
-          if (!isNaN(m)) next.macroVolume = total - m;
-        }
-      }
-      return next;
-    });
-  };
-
-  const handleMicroChange = (val) => {
-    const micro = parseFloat(val);
-    const total = parseFloat(formData.totalSampleVolume);
-    setFormData(prev => {
-      let next = { ...prev, microVolume: val };
-      if (prev.macroRequired && !isNaN(total) && !isNaN(micro)) {
-        next.macroVolume = total - micro;
-      }
-      return next;
-    });
-  };
-
-  const handleMacroChange = (val) => {
-    const macro = parseFloat(val);
-    const total = parseFloat(formData.totalSampleVolume);
-    setFormData(prev => {
-      let next = { ...prev, macroVolume: val };
-      if (prev.microRequired && !isNaN(total) && !isNaN(macro)) {
-        next.microVolume = total - macro;
-      }
-      return next;
-    });
+  const removeParam = (index) => {
+    setSelectedParams(selectedParams.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (selectedParams.length === 0) return alert('Select at least one parameter');
     try {
-      const distribution = {
-        micro: {
-          required: formData.microRequired,
-          volume: formData.microVolume ? parseFloat(formData.microVolume) : 0,
-          assignedTo: formData.microAssignedTo || undefined
-        },
-        macro: {
-          required: formData.macroRequired,
-          volume: formData.macroVolume ? parseFloat(formData.macroVolume) : 0,
-          assignedTo: formData.macroAssignedTo || undefined
-        }
-      };
-
+      const parameters = selectedParams.map(p => ({
+        parameterId: p._id,
+        name: p.name,
+        type: p.type,
+        unit: p.unit
+      }));
       await axios.post('http://localhost:5000/api/jobs', {
         clientName: formData.clientName,
-        totalSampleVolume: parseFloat(formData.totalSampleVolume),
-        distribution
+        parameters
       });
       setShowForm(false);
-      setFormData({
-        clientName: '', totalSampleVolume: '',
-        microRequired: false, microVolume: '', microAssignedTo: '',
-        macroRequired: false, macroVolume: '', macroAssignedTo: ''
-      });
+      setFormData({ clientName: '' });
+      setSelectedParams([]);
       fetchJobs();
     } catch (err) {
       console.error(err);
@@ -462,78 +445,76 @@ function Jobs() {
       </div>
 
       {showForm && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <h3 style={{ marginBottom: '1.5rem' }}>Log New Sample & Distribute</h3>
+        <div className="card" style={{ marginBottom: '2rem', overflow: 'visible' }}>
+          <h3 style={{ marginBottom: '1.5rem' }}>Log New Sample & Select Parameters</h3>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Client Name</label>
-                <input type="text" value={formData.clientName} onChange={e => setFormData({ ...formData, clientName: e.target.value })} required />
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Client Name</label>
+              <input type="text" value={formData.clientName} onChange={e => setFormData({ clientName: e.target.value })} required style={{ width: '100%', maxWidth: '400px' }} />
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Search Parameters</label>
+              <input type="text" placeholder="Type to search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', maxWidth: '400px' }} />
+              
+              {searchTerm && !showAddParam && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', maxWidth: '400px', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', zIndex: 10, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto' }}>
+                  {searchResults.map(p => (
+                    <div key={p._id} onClick={() => handleAddExistingParam(p)} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{p.name}</span>
+                      <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type}</span>
+                    </div>
+                  ))}
+                  {searchResults.length === 0 && (
+                    <div style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>No parameters found.</div>
+                  )}
+                  <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); }}>
+                    + Add New Parameter "{searchTerm}"
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {showAddParam && (
+              <div style={{ padding: '1rem', border: '1px dashed var(--color-primary)', borderRadius: 'var(--radius-md)', maxWidth: '500px' }}>
+                <h4 style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>Add New Parameter</h4>
+                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                  <input style={{ flex: 2 }} type="text" value={newParam.name} onChange={e => setNewParam({ ...newParam, name: e.target.value })} placeholder="Parameter Name" required />
+                  <select style={{ flex: 1 }} value={newParam.type} onChange={e => setNewParam({ ...newParam, type: e.target.value })}>
+                    <option value="Micro">Micro</option>
+                    <option value="Chemical">Chemical</option>
+                  </select>
+                  <input style={{ flex: 1 }} type="text" value={newParam.unit} onChange={e => setNewParam({ ...newParam, unit: e.target.value })} placeholder="Unit" required />
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" onClick={handleAddNewParam} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem' }}>Save & Select</button>
+                  <button type="button" onClick={() => setShowAddParam(false)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem', border: '1px solid var(--color-border)' }}>Cancel</button>
+                </div>
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Total Sample Volume (ml/g)</label>
-                <input type="number" step="0.01" value={formData.totalSampleVolume} onChange={e => handleTotalChange(e.target.value)} required />
+            )}
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Selected Parameters</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {selectedParams.length === 0 ? <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>None selected</span> : null}
+                {selectedParams.map((p, index) => (
+                  <div key={index} style={{ 
+                    display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.8rem', borderRadius: '9999px', fontSize: '0.85rem', fontWeight: 500,
+                    backgroundColor: p.type === 'Micro' ? '#dcfce7' : '#e0f2fe',
+                    color: p.type === 'Micro' ? '#166534' : '#075985',
+                    border: `1px solid ${p.type === 'Micro' ? '#bbf7d0' : '#bae6fd'}`
+                  }}>
+                    {p.name} ({p.unit})
+                    <button type="button" onClick={() => removeParam(index)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '1.5rem' }}>
-              {/* MICRO SECTION */}
-              <div 
-                className={`selectable-card ${formData.microRequired ? 'selected' : ''}`}
-                onClick={() => setFormData(prev => ({ ...prev, microRequired: !prev.microRequired }))}
-                style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
-              >
-                <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to MICRO</span>
-                  {formData.microRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
-                </div>
-                {formData.microRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Micro Volume</label>
-                      <input type="number" step="0.01" value={formData.microVolume} onChange={e => handleMicroChange(e.target.value)} required />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
-                      <select value={formData.microAssignedTo} onChange={e => setFormData({ ...formData, microAssignedTo: e.target.value })} required>
-                        <option value="">Select Head...</option>
-                        {heads.filter(h => h.department === 'Micro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* CHEMICAL SECTION */}
-              <div 
-                className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`}
-                onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))}
-                style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
-              >
-                <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to CHEMICAL</span>
-                  {formData.macroRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
-                </div>
-                {formData.macroRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Chemical Volume</label>
-                      <input type="number" step="0.01" value={formData.macroVolume} onChange={e => handleMacroChange(e.target.value)} required />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head</label>
-                      <select value={formData.macroAssignedTo} onChange={e => setFormData({ ...formData, macroAssignedTo: e.target.value })} required>
-                        <option value="">Select Head...</option>
-                        {heads.filter(h => h.department === 'Macro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={!formData.microRequired && !formData.macroRequired}>
-              Submit Job & Dispatch
+            <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={selectedParams.length === 0}>
+              Create Job & Dispatch to Departments
             </button>
           </form>
         </div>
@@ -541,93 +522,6 @@ function Jobs() {
 
       <div style={{ marginTop: '2rem' }}>
         <JobLogTable jobs={jobs} title="All Client Sample Jobs" />
-      </div>
-    </div>
-  );
-}
-
-// Blueprint UI can be very similar to Domain Head
-function Blueprints() {
-  const [blueprints, setBlueprints] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ name: '', department: 'Micro', parameters: [{ name: '', unit: '', referenceRange: '' }] });
-
-  const fetchBlueprints = async () => {
-    try {
-      const res = await axios.get('http://localhost:5000/api/tests/blueprints');
-      setBlueprints(res.data);
-    } catch(err) { console.error(err); }
-  };
-
-  useEffect(() => { fetchBlueprints(); }, []);
-
-  const addParam = () => setFormData(p => ({ ...p, parameters: [...p.parameters, { name: '', unit: '', referenceRange: '' }] }));
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (formData.parameters.length === 0) return alert('At least one parameter is required');
-    try {
-      await axios.post('http://localhost:5000/api/tests/blueprints', formData);
-      setShowForm(false);
-      setFormData({ name: '', department: 'Micro', parameters: [{ name: '', unit: '', referenceRange: '' }] });
-      fetchBlueprints();
-    } catch (err) { alert('Error creating blueprint'); }
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h1>Test Blueprints</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>{showForm ? 'Close' : '+ New Blueprint'}</button>
-      </div>
-
-      {showForm && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
-          <h3>Create Test Blueprint</h3>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <input style={{ flex: 2 }} type="text" placeholder="Blueprint Name (e.g. Complete Blood Count)" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} required />
-              <select style={{ flex: 1 }} value={formData.department} onChange={e => setFormData(p => ({ ...p, department: e.target.value }))}>
-                <option value="Micro">Micro</option>
-                <option value="Macro">Chemical</option>
-              </select>
-            </div>
-            <h4>Parameters</h4>
-            {formData.parameters.map((p, i) => (
-              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input style={{ flex: 2 }} type="text" placeholder="Parameter Name" value={p.name} onChange={e => { const newParams = [...formData.parameters]; newParams[i].name = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
-                <input style={{ flex: 1 }} type="text" placeholder="Unit" value={p.unit} onChange={e => { const newParams = [...formData.parameters]; newParams[i].unit = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
-                <input style={{ flex: 1 }} type="text" placeholder="Range" value={p.referenceRange} onChange={e => { const newParams = [...formData.parameters]; newParams[i].referenceRange = e.target.value; setFormData(prev => ({ ...prev, parameters: newParams })); }} required />
-                {formData.parameters.length > 1 && (
-                  <button type="button" onClick={() => setFormData(prev => ({ ...prev, parameters: prev.parameters.filter((_, idx) => idx !== i) }))} style={{ border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0 0.5rem' }}>
-                    <Trash2 size={20} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-              <button type="button" onClick={addParam} className="btn" style={{ border: '1px solid var(--color-border)', alignSelf: 'flex-start' }}>+ Add Parameter</button>
-              <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>Save Blueprint</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table>
-          <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
-            <tr><th>Name</th><th>Department</th><th>Parameters count</th></tr>
-          </thead>
-          <tbody>
-            {blueprints.map(b => (
-              <tr key={b._id}>
-                <td style={{ fontWeight: 500 }}>{b.name}</td>
-                <td>{b.department}</td>
-                <td>{b.parameters.length} params</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
     </div>
   );
@@ -817,7 +711,7 @@ function Audit() {
               <tr>
                 <th>Test Code</th>
                 <th>Client Name</th>
-                <th>Blueprint</th>
+                <th>Parameters</th>
                 <th>Department</th>
                 <th>Status</th>
                 <th>Date Completed</th>
@@ -832,7 +726,7 @@ function Audit() {
                   <tr key={inst._id} style={{ opacity: inst.status === 'REOPENED' ? 0.6 : 1 }}>
                     <td style={{ fontFamily: 'monospace' }}>{inst.testCode}</td>
                     <td style={{ fontWeight: 500 }}>{inst.clientName}</td>
-                    <td>{inst.blueprintId?.name}</td>
+                    <td>{inst.results?.length || 0} params</td>
                     <td style={{ fontWeight: 500, fontSize: '0.85rem' }}>
                       {inst.createdBy?.department?.toUpperCase() === 'MACRO' ? 'CHEMICAL' : inst.createdBy?.department?.toUpperCase() || '—'}
                     </td>
@@ -937,9 +831,9 @@ function LabReviewQueue() {
                 onClick={() => setSelectedInstance(selectedInstance === inst._id ? null : inst._id)}
               >
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{inst.blueprintId?.name}</div>
+                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>Test {inst.testCode}</div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
-                    Code: <span style={{ fontFamily: 'monospace' }}>{inst.testCode}</span> · Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
+                    Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
                   </div>
                 </div>
                 <span className="badge badge-primary">HEAD Approved — Awaiting Final Review</span>
@@ -1028,7 +922,6 @@ export default function LabHeadDashboard() {
       <Route path="/" element={<Dashboard />} />
       <Route path="/review" element={<LabReviewQueue />} />
       <Route path="/jobs" element={<Jobs />} />
-      <Route path="/blueprints" element={<Blueprints />} />
       <Route path="/users" element={<UsersPage />} />
       <Route path="/audit" element={<Audit />} />
     </Routes>

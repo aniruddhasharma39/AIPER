@@ -298,180 +298,89 @@ function Assistants() {
   );
 }
 
-function Blueprints() {
-  const [blueprints, setBlueprints] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
-  const [error, setError] = useState('');
-  const { user } = useContext(AuthContext);
-  const defaultUnits = ["mg/L", "ppm", "pH", "%", "CFU/g", "Custom..."];
-
-  const [parameters, setParameters] = useState([
-    { name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }
-  ]);
-
-  const fetchBlueprints = async () => {
-    try {
-      const res = await axios.get('http://localhost:5000/api/tests/blueprints');
-      setBlueprints(res.data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  useEffect(() => { fetchBlueprints(); }, []);
-
-  const addParameterRow = () => {
-    setParameters([...parameters, { name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }]);
-  };
-
-  const removeParameterRow = (index) => {
-    setParameters(parameters.filter((_, i) => i !== index));
-  };
-
-  const updateParameter = (index, field, value) => {
-    const updated = [...parameters];
-    updated[index][field] = value;
-    setParameters(updated);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (parameters.length === 0) {
-      setError('At least one parameter is required');
-      return;
-    }
-    try {
-      const finalParams = parameters.map(p => ({
-        name: p.name,
-        referenceRange: p.referenceRange,
-        unit: p.unitType === 'Custom...' ? p.customUnit : p.unitType
-      }));
-      await axios.post('http://localhost:5000/api/tests/blueprints', {
-        name, department: user.department || 'HQ', parameters: finalParams
-      });
-      setName(''); setParameters([{ name: '', referenceRange: '', unitType: 'mg/L', customUnit: '' }]);
-      setShowForm(false);
-      fetchBlueprints();
-    } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.message || err.response?.data?.error || err.message || 'Operation failed');
-    }
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <h1>Test Blueprints</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Close' : '+ New Blueprint'}
-        </button>
-      </div>
-
-      {showForm && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
-          <h3 style={{ marginBottom: '1rem' }}>Create Test Blueprint</h3>
-          {error && <div style={{ marginBottom: '1rem', color: 'var(--color-danger)', backgroundColor: 'var(--color-danger-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{error}</div>}
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <input style={{ flex: 1 }} type="text" value={name} onChange={e => setName(e.target.value)} required placeholder="Blueprint Name (e.g. Soil Chemistry Profile)" />
-            </div>
-
-            <div style={{ marginTop: '0.5rem' }}>
-              <h4 style={{ marginBottom: '1rem' }}>Parameters</h4>
-            </div>
-
-            {parameters.map((p, i) => (
-              <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input style={{ flex: 2 }} type="text" value={p.name} onChange={e => updateParameter(i, 'name', e.target.value)} required placeholder="Parameter Name" />
-                <input style={{ flex: 1.5 }} type="text" value={p.referenceRange} onChange={e => updateParameter(i, 'referenceRange', e.target.value)} required placeholder="Reference Range" />
-                <select style={{ flex: 1 }} value={p.unitType} onChange={e => updateParameter(i, 'unitType', e.target.value)} required>
-                  {defaultUnits.map(du => <option key={du} value={du}>{du}</option>)}
-                </select>
-                {p.unitType === 'Custom...' && (
-                  <input style={{ flex: 1 }} type="text" value={p.customUnit} onChange={e => updateParameter(i, 'customUnit', e.target.value)} required placeholder="Custom Unit" />
-                )}
-                {parameters.length > 1 && (
-                  <button type="button" onClick={() => removeParameterRow(i)} style={{ border: 'none', background: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0 0.5rem' }}>
-                    <Trash2 size={20} />
-                  </button>
-                )}
-              </div>
-            ))}
-
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-              <button type="button" onClick={addParameterRow} className="btn" style={{ border: '1px solid var(--color-border)', alignSelf: 'flex-start' }}>
-                + Add Parameter
-              </button>
-              <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>
-                Save Blueprint
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {blueprints.length === 0 ? <p style={{ color: 'var(--color-text-muted)' }}>No blueprints created yet.</p> : null}
-        {blueprints.map(bp => (
-          <div key={bp._id} className="card" style={{ padding: '1rem 1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, color: 'var(--color-primary-dark)' }}>{bp.name}</h3>
-              <span className="badge badge-warning">{bp.parameters.length} Parameters</span>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
-              {bp.parameters.map(p => (
-                <div key={p._id} style={{ fontSize: '0.85rem', backgroundColor: 'var(--color-surface-hover)', border: '1px solid var(--color-border)', padding: '0.3rem 0.6rem', borderRadius: '4px' }}>
-                  <b>{p.name}</b> ({p.unit})
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function Dispatcher() {
   const [assistants, setAssistants] = useState([]);
-  const [blueprints, setBlueprints] = useState([]);
   const [jobs, setJobs] = useState([]);
   const { user } = useContext(AuthContext);
 
   const [formData, setFormData] = useState({
-    blueprintId: '', jobId: '', deadline: '', assignedTo: ''
+    jobId: '', deadline: ''
   });
+  const [assignments, setAssignments] = useState({}); // parameterId -> assignedTo assistant ID
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    axios.get('http://localhost:5000/api/users').then(res => setAssistants(res.data)).catch(console.error);
-    axios.get('http://localhost:5000/api/tests/blueprints').then(res => setBlueprints(res.data)).catch(console.error);
+    axios.get('http://localhost:5000/api/users').then(res => {
+      const dept = user?.department ? user.department : '';
+      setAssistants(res.data.filter(u => u.role === 'ASSISTANT' && u.department === dept));
+    }).catch(console.error);
 
     // Fetch Jobs assigned to this head
     axios.get('http://localhost:5000/api/jobs').then(res => {
       const dept = user?.department ? user.department.toLowerCase() : '';
       // filter pending
-      setJobs(res.data.filter(j => j.distribution[dept]?.status === 'PENDING'));
+      setJobs(res.data.filter(j => j.distribution[dept === 'chemical' ? 'macro' : dept]?.status === 'PENDING'));
     }).catch(console.error);
   }, [user]);
 
+  const selectedJob = jobs.find(j => j._id === formData.jobId);
+  const deptParams = selectedJob?.parameters?.filter(p => {
+    const d = user?.department ? user.department.toLowerCase() : '';
+    const pt = p.type ? p.type.toLowerCase() : '';
+    if ((d === 'macro' || d === 'chemical') && pt === 'chemical') return true;
+    if (d === 'micro' && pt === 'micro') return true;
+    return false;
+  }) || [];
+
+  const handleAssign = (paramId, assistantId) => {
+    setAssignments({ ...assignments, [paramId]: assistantId });
+  };
+
+  const handleAssignAll = (e) => {
+    const assistantId = e.target.value;
+    if (!assistantId) return;
+    const newAssignments = { ...assignments };
+    deptParams.forEach(p => {
+      newAssignments[p.parameterId._id] = assistantId;
+    });
+    setAssignments(newAssignments);
+    // reset select
+    e.target.value = "";
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (Object.keys(assignments).length !== deptParams.length) {
+      return alert('Please assign all parameters');
+    }
     try {
-      await axios.post('http://localhost:5000/api/tests/instances', formData);
+      const assignmentList = deptParams.map(p => ({
+        parameterId: p.parameterId._id,
+        name: p.name,
+        type: p.type,
+        unit: p.unit,
+        assignedTo: assignments[p.parameterId._id]
+      }));
+
+      await axios.post('http://localhost:5000/api/tests/instances', {
+        jobId: formData.jobId,
+        deadline: formData.deadline,
+        assignments: assignmentList
+      });
+      
       setSuccess('Job dispatched successfully!');
-      setFormData({ blueprintId: '', jobId: '', deadline: '', assignedTo: '' });
+      setFormData({ jobId: '', deadline: '' });
+      setAssignments({});
       setTimeout(() => setSuccess(''), 4000);
 
       // refresh jobs
       const dept = user?.department ? user.department.toLowerCase() : '';
       axios.get('http://localhost:5000/api/jobs').then(res => {
-        setJobs(res.data.filter(j => j.distribution[dept]?.status === 'PENDING'));
+        setJobs(res.data.filter(j => j.distribution[dept === 'chemical' ? 'macro' : dept]?.status === 'PENDING'));
       });
     } catch (err) {
       console.error(err);
+      alert('Error dispatching job');
     }
   };
 
@@ -485,41 +394,49 @@ function Dispatcher() {
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Pending Sample Job</label>
-            <select value={formData.jobId} onChange={e => setFormData({ ...formData, jobId: e.target.value })} required>
+            <select value={formData.jobId} onChange={e => { setFormData({ ...formData, jobId: e.target.value }); setAssignments({}); }} required>
               <option value="" disabled>--- Select a Job ---</option>
-              {jobs.map(j => {
-                const dept = user?.department ? user.department.toLowerCase() : '';
-                return (
-                  <option key={j._id} value={j._id}>
-                    {j.jobCode} - {j.clientName} (Vol: {j.distribution[dept]?.volume})
-                  </option>
-                );
-              })}
+              {jobs.map(j => (
+                <option key={j._id} value={j._id}>
+                  {j.jobCode} - {j.clientName}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Master Schema</label>
-            <select value={formData.blueprintId} onChange={e => setFormData({ ...formData, blueprintId: e.target.value })} required>
-              <option value="" disabled>--- Select a Schema ---</option>
-              {blueprints.map(bp => <option key={bp._id} value={bp._id}>{bp.name} ({bp.parameters.length} params)</option>)}
-            </select>
-          </div>
+          {selectedJob && deptParams.length > 0 && (
+            <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h4 style={{ margin: 0 }}>Assign Parameters</h4>
+                <select onChange={handleAssignAll} defaultValue="">
+                  <option value="" disabled>Bulk Assign To...</option>
+                  {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {deptParams.map(p => (
+                  <div key={p.parameterId._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--color-surface-hover)', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)' }}>
+                    <span><b>{p.name}</b> <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>({p.unit})</span></span>
+                    <select 
+                      value={assignments[p.parameterId._id] || ''} 
+                      onChange={e => handleAssign(p.parameterId._id, e.target.value)}
+                      required
+                    >
+                      <option value="" disabled>Assign Assistant...</option>
+                      {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Global Deadline</label>
             <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({ ...formData, deadline: e.target.value })} required />
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Assign to Lab Assistant</label>
-            <select value={formData.assignedTo} onChange={e => setFormData({ ...formData, assignedTo: e.target.value })} required>
-              <option value="" disabled>--- Assign Assistant ---</option>
-              {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name} ({ast.email})</option>)}
-            </select>
-          </div>
-
-          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }} disabled={jobs.length === 0}>
+          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }} disabled={jobs.length === 0 || deptParams.length === 0}>
             {jobs.length === 0 ? 'No Pending Jobs' : 'Submit & Dispatch Secure Job'}
           </button>
         </form>
@@ -597,9 +514,9 @@ function ReviewQueue() {
                 onClick={() => setSelectedInstance(selectedInstance === inst._id ? null : inst._id)}
               >
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{inst.blueprintId?.name}</div>
+                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>Test {inst.testCode}</div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
-                    Code: <span style={{ fontFamily: 'monospace' }}>{inst.testCode}</span> · Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
+                    Analyst: {inst.assignedTo?.name} · Client: {inst.clientName}
                   </div>
                 </div>
                 <span className="badge badge-warning">Awaiting Review</span>

@@ -3,12 +3,15 @@ const mongoose = require('mongoose');
 const jobSchema = new mongoose.Schema({
   jobCode: { type: String, required: true, unique: true },
   clientName: { type: String, required: true },
-  totalSampleVolume: { type: Number, required: true },
+  parameters: [{
+    parameterId: { type: mongoose.Schema.Types.ObjectId, ref: 'Parameter' },
+    name: { type: String },
+    type: { type: String, enum: ['Micro', 'Chemical'] },
+    unit: { type: String }
+  }],
   distribution: {
     micro: {
       required: { type: Boolean, default: false },
-      volume: { type: Number },
-      assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
       reopenInfo: {
         parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance' },
@@ -18,8 +21,6 @@ const jobSchema = new mongoose.Schema({
     },
     macro: {
       required: { type: Boolean, default: false },
-      volume: { type: Number },
-      assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
       reopenInfo: {
         parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance' },

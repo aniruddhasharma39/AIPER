@@ -6,24 +6,26 @@ const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const { createNotification, notifyAdmins, notifyLabHeads } = require('../utils/notifier');
 
+const User = require('../models/User');
+
 // Get all jobs based on role
 router.get('/', protect, async (req, res) => {
   try {
     let query = {};
     if (req.user.role === 'HEAD') {
-      // Head sees jobs assigned to their department
-      query = {
-        $or: [
-          { 'distribution.micro.assignedTo': req.user._id },
-          { 'distribution.macro.assignedTo': req.user._id }
-        ]
-      };
+      const dept = req.user.department ? req.user.department.toLowerCase() : '';
+      if (dept === 'micro') {
+        query = { 'distribution.micro.required': true };
+      } else if (dept === 'macro' || dept === 'chemical') {
+        query = { 'distribution.macro.required': true };
+      } else {
+        query = { _id: null }; // Should not happen
+      }
     }
     // LAB_HEAD and ADMIN see all jobs.
     const jobs = await Job.find(query)
       .populate('createdBy', 'name email')
-      .populate('distribution.micro.assignedTo', 'name')
-      .populate('distribution.macro.assignedTo', 'name')
+      .populate('parameters.parameterId', 'name unit type')
       .sort({ createdAt: -1 });
 
     // We want to fetch the associated test instances for timeline across all roles
@@ -42,14 +44,22 @@ router.get('/', protect, async (req, res) => {
 // Create a new job (LAB_HEAD only)
 router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
   try {
-    const { clientName, totalSampleVolume, distribution } = req.body;
+    const { clientName, parameters } = req.body;
     
     const jobCode = 'JOB-' + Math.floor(1000 + Math.random() * 9000);
+
+    const hasMicro = parameters && parameters.some(p => p.type === 'Micro');
+    const hasMacro = parameters && parameters.some(p => p.type === 'Chemical');
+
+    const distribution = {
+      micro: { required: hasMicro, status: 'PENDING' },
+      macro: { required: hasMacro, status: 'PENDING' }
+    };
 
     const job = await Job.create({
       jobCode,
       clientName,
-      totalSampleVolume,
+      parameters,
       distribution,
       createdBy: req.user._id
     });
@@ -62,25 +72,31 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
       relatedJobId: job._id
     });
 
-    // Notify assigned HEADs
-    if (distribution?.micro?.required && distribution.micro.assignedTo) {
-      await createNotification({
-        recipient: distribution.micro.assignedTo,
-        type: 'ACTION_REQUIRED',
-        title: 'New Job Dispatched',
-        message: `Job ${jobCode} requires MICRO department analysis.`,
-        relatedJobId: job._id
-      });
+    // Notify all relevant HEADs
+    if (hasMicro) {
+      const microHeads = await User.find({ role: 'HEAD', department: { $regex: /^micro$/i } });
+      for (const head of microHeads) {
+        await createNotification({
+          recipient: head._id,
+          type: 'ACTION_REQUIRED',
+          title: 'New Job Available',
+          message: `Job ${jobCode} requires MICRO department analysis.`,
+          relatedJobId: job._id
+        });
+      }
     }
     
-    if (distribution?.macro?.required && distribution.macro.assignedTo) {
-      await createNotification({
-        recipient: distribution.macro.assignedTo,
-        type: 'ACTION_REQUIRED',
-        title: 'New Job Dispatched',
-        message: `Job ${jobCode} requires CHEMICAL department analysis.`,
-        relatedJobId: job._id
-      });
+    if (hasMacro) {
+      const macroHeads = await User.find({ role: 'HEAD', department: { $regex: /^(macro|chemical)$/i } });
+      for (const head of macroHeads) {
+        await createNotification({
+          recipient: head._id,
+          type: 'ACTION_REQUIRED',
+          title: 'New Job Available',
+          message: `Job ${jobCode} requires CHEMICAL department analysis.`,
+          relatedJobId: job._id
+        });
+      }
     }
 
     res.status(201).json(job);
