@@ -5,7 +5,7 @@ const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
 const Notification = require('../models/Notification');
-const { createNotification, notifyLabHeads } = require('../utils/notifier');
+const { createNotification, notifyLabHeads, notifyAdmins } = require('../utils/notifier');
 
 // --- TEST INSTANCES ---
 
@@ -50,28 +50,33 @@ router.get('/instances', protect, async (req, res) => {
 // Head dispatches tests to assistants
 router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
   try {
-    const { jobId, deadline, assignments } = req.body;
+    const { jobId, deadline, assignments, blueprintId } = req.body;
 
     const job = await Job.findById(jobId);
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
+    // Not needed for parameter-based flow anymore, but keeping placeholder
+    // just in case any legacy flow reaches here
+    const testCode = '#UL-' + Math.floor(1000 + Math.random() * 9000) + 'X';
     const dept = req.user.department ? req.user.department.toLowerCase() : 'micro';
+    const clientName = (job.customer && job.customer.customer_name) || job.clientName || '';
 
     // Group assignments by assignedTo (assistant ID)
     const assistantMap = {};
-    assignments.forEach(assignment => {
-      const astId = assignment.assignedTo;
-      if (!assistantMap[astId]) {
-        assistantMap[astId] = [];
-      }
-      assistantMap[astId].push({
-        parameterId: assignment.parameterId,
-        name: assignment.name,
-        value: '',
-        unit: assignment.unit,
-        referenceRange: '' // Deprecated or manually set later
-      });
-    });
+    if (assignments && Array.isArray(assignments)) {
+      assignments.forEach(assignment => {
+        const astId = assignment.assignedTo;
+        if (!assistantMap[astId]) {
+          assistantMap[astId] = [];
+        }
+        assistantMap[astId].push({
+          parameterId: assignment.parameterId,
+          name: assignment.name,
+          value: '',
+          unit: assignment.unit,
+          referenceRange: '' // Deprecated or manually set later
+        });
+    }
 
     const createdInstances = [];
 

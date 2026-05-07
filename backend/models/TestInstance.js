@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const resultParameterSchema = new mongoose.Schema({
-  parameterId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  parameterId: { type: String, required: true },
   name: { type: String }, // copied from blueprint
   value: { type: String }, // filled by assistant
   unit: { type: String },
@@ -18,6 +18,7 @@ const reviewEntrySchema = new mongoose.Schema({
 
 const testInstanceSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' }, // Link to Lab Head created Job
+  // Removed blueprintId dependency
   testCode: { type: String, required: true, unique: true }, // e.g. #UL-782X
   clientName: { type: String },
   deadline: { type: Date, required: true },

@@ -380,7 +380,7 @@ function Dispatcher() {
       });
     } catch (err) {
       console.error(err);
-      alert('Error dispatching job');
+      alert('Error: ' + (err.response?.data?.message || err.message));
     }
   };
 
@@ -407,20 +407,34 @@ function Dispatcher() {
           {selectedJob && deptParams.length > 0 && (
             <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h4 style={{ margin: 0 }}>Assign Parameters</h4>
-                <select onChange={handleAssignAll} defaultValue="">
-                  <option value="" disabled>Bulk Assign To...</option>
-                  {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
-                </select>
+                <h4 style={{ margin: 0 }}>Assign Parameters ({deptParams.length} total)</h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Bulk assign all to:</label>
+                  <select onChange={handleAssignAll} defaultValue="">
+                    <option value="" disabled>Select assistant...</option>
+                    {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
+                  </select>
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {deptParams.map(p => (
-                  <div key={p.parameterId._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--color-surface-hover)', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)' }}>
-                    <span><b>{p.name}</b> <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>({p.unit})</span></span>
-                    <select 
-                      value={assignments[p.parameterId._id] || ''} 
+                  <div key={p.parameterId._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--color-surface-hover)', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', gap: '1rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', flex: 1 }}>
+                      <input
+                        type="checkbox"
+                        checked={!!assignments[p.parameterId._id]}
+                        onChange={e => {
+                          if (!e.target.checked) handleAssign(p.parameterId._id, '');
+                        }}
+                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      <span><b>{p.name}</b> <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>({p.unit})</span></span>
+                    </label>
+                    <select
+                      value={assignments[p.parameterId._id] || ''}
                       onChange={e => handleAssign(p.parameterId._id, e.target.value)}
                       required
+                      style={{ minWidth: '160px' }}
                     >
                       <option value="" disabled>Assign Assistant...</option>
                       {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}

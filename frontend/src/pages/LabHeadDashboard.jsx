@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
 import ReportViewer from '../components/ReportViewer';
 import { AuthContext } from '../context/AuthContext';
@@ -352,15 +352,39 @@ function UsersPage() {
   );
 }
 
+const BLANK_FORM = {
+  // Customer
+  customer_name: '', customer_address: '', contact_person: '',
+  mobile_number: '', email: '', customer_reference_no: '',
+  // Sample
+  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: 'ml',
+  sample_quantity_custom_unit: '', sample_description: '', condition_on_receipt: '',
+  packing_details: '', marking_seal: '', sample_source: '',
+  received_date: '', received_mode: '', sampling_details: '',
+  test_parameters: [], test_param_input: '',
+  // Compliance
+  statement_of_conformity: '', decision_rule: '', accreditation_scope: '',
+  disclaimer_notes: '', special_handling_instructions: '',
+  // Distribution
+  microRequired: false, microVolume: '', microAssignedTo: '',
+  macroRequired: false, macroVolume: '', macroAssignedTo: ''
+};
+
 function Jobs() {
   const [jobs, setJobs] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ clientName: '' });
+  const [formData, setFormData] = useState({ ...BLANK_FORM });
+  const [sections, setSections] = useState({ customer: true, sample: false, compliance: false, parameters: false });
+
+  // Parameter search state
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedParams, setSelectedParams] = useState([]);
   const [showAddParam, setShowAddParam] = useState(false);
   const [newParam, setNewParam] = useState({ name: '', type: 'Micro', unit: 'mg/L' });
+
+  const toggleSection = (s) => setSections(prev => ({ ...prev, [s]: !prev[s] }));
+  const setField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
 
   const fetchJobs = async () => {
     try {
@@ -371,6 +395,7 @@ function Jobs() {
 
   useEffect(() => { fetchJobs(); }, []);
 
+  // Parameter search debounce
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (searchTerm.trim()) {
@@ -421,12 +446,43 @@ function Jobs() {
         type: p.type,
         unit: p.unit
       }));
+
+      const unit = formData.sample_quantity_unit === 'custom' ? formData.sample_quantity_custom_unit : formData.sample_quantity_unit;
+
       await axios.post('http://localhost:5000/api/jobs', {
-        clientName: formData.clientName,
+        customer: {
+          customer_name: formData.customer_name,
+          customer_address: formData.customer_address,
+          contact_person: formData.contact_person,
+          mobile_number: formData.mobile_number,
+          email: formData.email,
+          customer_reference_no: formData.customer_reference_no
+        },
+        sample: {
+          sample_name: formData.sample_name,
+          sample_id: formData.sample_id,
+          sample_quantity: `${formData.sample_quantity} ${unit}`.trim(),
+          sample_description: formData.sample_description,
+          condition_on_receipt: formData.condition_on_receipt,
+          packing_details: formData.packing_details,
+          marking_seal: formData.marking_seal,
+          sample_source: formData.sample_source,
+          received_date: formData.received_date,
+          received_mode: formData.received_mode,
+          sampling_details: formData.sampling_details,
+          test_parameters: []
+        },
+        compliance: {
+          statement_of_conformity: formData.statement_of_conformity,
+          decision_rule: formData.decision_rule,
+          accreditation_scope: formData.accreditation_scope,
+          disclaimer_notes: formData.disclaimer_notes,
+          special_handling_instructions: formData.special_handling_instructions
+        },
         parameters
       });
       setShowForm(false);
-      setFormData({ clientName: '' });
+      setFormData({ ...BLANK_FORM });
       setSelectedParams([]);
       fetchJobs();
     } catch (err) {
@@ -446,71 +502,171 @@ function Jobs() {
 
       {showForm && (
         <div className="card" style={{ marginBottom: '2rem', overflow: 'visible' }}>
-          <h3 style={{ marginBottom: '1.5rem' }}>Log New Sample & Select Parameters</h3>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Client Name</label>
-              <input type="text" value={formData.clientName} onChange={e => setFormData({ clientName: e.target.value })} required style={{ width: '100%', maxWidth: '400px' }} />
-            </div>
+          <h3 style={{ marginBottom: '1.5rem' }}>Log New Sample & Distribute</h3>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-            <div style={{ position: 'relative' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Search Parameters</label>
-              <input type="text" placeholder="Type to search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', maxWidth: '400px' }} />
-              
-              {searchTerm && !showAddParam && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', maxWidth: '400px', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', zIndex: 10, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto' }}>
-                  {searchResults.map(p => (
-                    <div key={p._id} onClick={() => handleAddExistingParam(p)} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{p.name}</span>
-                      <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type}</span>
-                    </div>
-                  ))}
-                  {searchResults.length === 0 && (
-                    <div style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>No parameters found.</div>
-                  )}
-                  <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); }}>
-                    + Add New Parameter "{searchTerm}"
-                  </div>
+            {/* ── CUSTOMER INFORMATION ── */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div onClick={() => toggleSection('customer')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.customer ? 'var(--color-surface-hover)' : 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {sections.customer ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <span style={{ fontWeight: 600 }}>Customer Information</span>
+                </div>
+                <span className="badge badge-primary" style={{ fontSize: '0.75rem' }}>Required</span>
+              </div>
+              {sections.customer && (
+                <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.customer_name} onChange={e => setField('customer_name', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Mobile Number <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.mobile_number} onChange={e => setField('mobile_number', e.target.value)} required /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Address <span style={{color:'var(--color-danger)'}}>*</span></label><textarea rows={2} value={formData.customer_address} onChange={e => setField('customer_address', e.target.value)} required style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Contact Person <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.contact_person} onChange={e => setField('contact_person', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Email <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input type="email" value={formData.email} onChange={e => setField('email', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Reference No. <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.customer_reference_no} onChange={e => setField('customer_reference_no', e.target.value)} /></div>
                 </div>
               )}
             </div>
 
-            {showAddParam && (
-              <div style={{ padding: '1rem', border: '1px dashed var(--color-primary)', borderRadius: 'var(--radius-md)', maxWidth: '500px' }}>
-                <h4 style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>Add New Parameter</h4>
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-                  <input style={{ flex: 2 }} type="text" value={newParam.name} onChange={e => setNewParam({ ...newParam, name: e.target.value })} placeholder="Parameter Name" required />
-                  <select style={{ flex: 1 }} value={newParam.type} onChange={e => setNewParam({ ...newParam, type: e.target.value })}>
-                    <option value="Micro">Micro</option>
-                    <option value="Chemical">Chemical</option>
-                  </select>
-                  <input style={{ flex: 1 }} type="text" value={newParam.unit} onChange={e => setNewParam({ ...newParam, unit: e.target.value })} placeholder="Unit" required />
+            {/* ── SAMPLE INFORMATION ── */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div onClick={() => toggleSection('sample')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.sample ? 'var(--color-surface-hover)' : 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {sections.sample ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <span style={{ fontWeight: 600 }}>Sample Information</span>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button type="button" onClick={handleAddNewParam} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem' }}>Save & Select</button>
-                  <button type="button" onClick={() => setShowAddParam(false)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem', border: '1px solid var(--color-border)' }}>Cancel</button>
-                </div>
+                <span className="badge badge-primary" style={{ fontSize: '0.75rem' }}>Required</span>
               </div>
-            )}
-
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Selected Parameters</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {selectedParams.length === 0 ? <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>None selected</span> : null}
-                {selectedParams.map((p, index) => (
-                  <div key={index} style={{ 
-                    display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.8rem', borderRadius: '9999px', fontSize: '0.85rem', fontWeight: 500,
-                    backgroundColor: p.type === 'Micro' ? '#dcfce7' : '#e0f2fe',
-                    color: p.type === 'Micro' ? '#166534' : '#075985',
-                    border: `1px solid ${p.type === 'Micro' ? '#bbf7d0' : '#bae6fd'}`
-                  }}>
-                    {p.name} ({p.unit})
-                    <button type="button" onClick={() => removeParam(index)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
-                      <Trash2 size={14} />
-                    </button>
+              {sections.sample && (
+                <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.sample_name} onChange={e => setField('sample_name', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample ID <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.sample_id} onChange={e => setField('sample_id', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Quantity <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input type="number" step="0.01" value={formData.sample_quantity} onChange={e => setField('sample_quantity', e.target.value)} required style={{ flex: 1 }} />
+                      <select value={formData.sample_quantity_unit} onChange={e => setField('sample_quantity_unit', e.target.value)} style={{ width: '90px' }}>
+                        <option value="ml">ml</option><option value="L">L</option><option value="g">g</option>
+                        <option value="kg">kg</option><option value="mg">mg</option><option value="custom">Custom...</option>
+                      </select>
+                    </div>
+                    {formData.sample_quantity_unit === 'custom' && (
+                      <input placeholder="Enter unit" value={formData.sample_quantity_custom_unit} onChange={e => setField('sample_quantity_custom_unit', e.target.value)} required style={{ marginTop: '0.5rem' }} />
+                    )}
                   </div>
-                ))}
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Date <span style={{color:'var(--color-danger)'}}>*</span></label><input type="date" value={formData.received_date} onChange={e => setField('received_date', e.target.value)} required /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Description <span style={{color:'var(--color-danger)'}}>*</span></label><textarea rows={2} value={formData.sample_description} onChange={e => setField('sample_description', e.target.value)} required style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Condition on Receipt <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.condition_on_receipt} onChange={e => setField('condition_on_receipt', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Packing Details</label><input value={formData.packing_details} onChange={e => setField('packing_details', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Marking / Seal</label><input value={formData.marking_seal} onChange={e => setField('marking_seal', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Source</label><input value={formData.sample_source} onChange={e => setField('sample_source', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Mode</label>
+                    <select value={formData.received_mode} onChange={e => setField('received_mode', e.target.value)}>
+                      <option value="">Select...</option>
+                      <option>Courier</option><option>Hand Delivery</option><option>Post</option><option>Other</option>
+                    </select>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sampling Details</label><textarea rows={2} value={formData.sampling_details} onChange={e => setField('sampling_details', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                </div>
+              )}
+            </div>
+
+            {/* ── COMPLIANCE & LEGAL ── */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div onClick={() => toggleSection('compliance')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.compliance ? 'var(--color-surface-hover)' : 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {sections.compliance ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <span style={{ fontWeight: 600 }}>Compliance & Legal Information</span>
+                </div>
+                <span className="badge badge-secondary" style={{ fontSize: '0.75rem' }}>Important</span>
               </div>
+              {sections.compliance && (
+                <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Statement of Conformity</label><textarea rows={2} value={formData.statement_of_conformity} onChange={e => setField('statement_of_conformity', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Accreditation Scope</label><input value={formData.accreditation_scope} onChange={e => setField('accreditation_scope', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Disclaimer Notes</label><textarea rows={2} value={formData.disclaimer_notes} onChange={e => setField('disclaimer_notes', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Decision Rule <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><input value={formData.decision_rule} onChange={e => setField('decision_rule', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Special Handling Instructions <span style={{color:'var(--color-text-muted)', fontSize:'0.8rem'}}>(optional)</span></label><textarea rows={2} value={formData.special_handling_instructions} onChange={e => setField('special_handling_instructions', e.target.value)} style={{ width: '100%', resize: 'vertical' }} /></div>
+                </div>
+              )}
+            </div>
+
+            {/* ── PARAMETERS (our system) ── */}
+            <div className="card" style={{ padding: 0, overflow: 'visible' }}>
+              <div onClick={() => toggleSection('parameters')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.parameters ? 'var(--color-surface-hover)' : 'transparent' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {sections.parameters ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+                  <span style={{ fontWeight: 600 }}>Test Parameters</span>
+                </div>
+                <span className="badge badge-primary" style={{ fontSize: '0.75rem' }}>{selectedParams.length} selected</span>
+              </div>
+              {sections.parameters && (
+                <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '1rem', overflow: 'visible' }}>
+                  {/* Search */}
+                  <div style={{ position: 'relative' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Search & Add Parameters</label>
+                    <input type="text" placeholder="Type to search parameters..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', maxWidth: '420px' }} />
+                    {searchTerm && !showAddParam && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', maxWidth: '420px', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', zIndex: 20, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto' }}>
+                        {searchResults.map(p => (
+                          <div key={p._id} onClick={() => handleAddExistingParam(p)} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{p.name}</span>
+                            <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type} · {p.unit}</span>
+                          </div>
+                        ))}
+                        {searchResults.length === 0 && (
+                          <div style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>No parameters found.</div>
+                        )}
+                        <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); }}>
+                          + Add New Parameter "{searchTerm}"
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* New param form */}
+                  {showAddParam && (
+                    <div style={{ padding: '1rem', border: '1px dashed var(--color-primary)', borderRadius: 'var(--radius-md)', maxWidth: '500px' }}>
+                      <h4 style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>Add New Parameter to Library</h4>
+                      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                        <input style={{ flex: 2 }} type="text" value={newParam.name} onChange={e => setNewParam({ ...newParam, name: e.target.value })} placeholder="Parameter Name" required />
+                        <select style={{ flex: 1 }} value={newParam.type} onChange={e => setNewParam({ ...newParam, type: e.target.value })}>
+                          <option value="Micro">Micro</option>
+                          <option value="Chemical">Chemical</option>
+                        </select>
+                        <input style={{ flex: 1 }} type="text" value={newParam.unit} onChange={e => setNewParam({ ...newParam, unit: e.target.value })} placeholder="Unit" required />
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button type="button" onClick={handleAddNewParam} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem' }}>Save & Select</button>
+                        <button type="button" onClick={() => setShowAddParam(false)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem', border: '1px solid var(--color-border)' }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Selected parameters pills */}
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Selected Parameters</label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      {selectedParams.length === 0 ? <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>None selected</span> : null}
+                      {selectedParams.map((p, index) => (
+                        <div key={index} style={{
+                          display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.8rem', borderRadius: '9999px', fontSize: '0.85rem', fontWeight: 500,
+                          backgroundColor: p.type === 'Micro' ? '#dcfce7' : '#e0f2fe',
+                          color: p.type === 'Micro' ? '#166534' : '#075985',
+                          border: `1px solid ${p.type === 'Micro' ? '#bbf7d0' : '#bae6fd'}`
+                        }}>
+                          {p.name} ({p.unit})
+                          <button type="button" onClick={() => removeParam(index)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {selectedParams.length > 0 && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                        {selectedParams.filter(p => p.type === 'Micro').length} Micro · {selectedParams.filter(p => p.type === 'Chemical').length} Chemical — departments auto-assigned from parameter types
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={selectedParams.length === 0}>
@@ -526,6 +682,57 @@ function Jobs() {
     </div>
   );
 }
+
+  const fetchJobs = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/jobs');
+      setJobs(res.data);
+    } catch (err) { console.error(err); }
+  };
+
+  useEffect(() => { fetchJobs(); }, []);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchTerm.trim()) {
+        try {
+          const res = await axios.get(`http://localhost:5000/api/parameters?search=${searchTerm}`);
+          setSearchResults(res.data);
+        } catch (err) { console.error(err); }
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
+  const handleAddExistingParam = (param) => {
+    if (!selectedParams.find(p => p._id === param._id)) {
+      setSelectedParams([...selectedParams, param]);
+    }
+    setSearchTerm('');
+    setSearchResults([]);
+  };
+
+  const handleAddNewParam = async (e) => {
+    e.preventDefault();
+    if (!newParam.name || !newParam.unit) return alert('Name and Unit are required');
+    try {
+      const res = await axios.post('http://localhost:5000/api/parameters', newParam);
+      setSelectedParams([...selectedParams, res.data]);
+      setShowAddParam(false);
+      setNewParam({ name: '', type: 'Micro', unit: 'mg/L' });
+      setSearchTerm('');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error adding parameter');
+    }
+  };
+
+  const removeParam = (index) => {
+    setSelectedParams(selectedParams.filter((_, i) => i !== index));
+  };
+
+
 
 
 function Audit() {
@@ -898,10 +1105,10 @@ function LabReviewQueue() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '1rem' }}>
-                      <button onClick={() => handleApprove(inst._id)} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
+                      <button onClick={(e) => { e.stopPropagation(); handleApprove(inst._id); }} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
                         <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Generate Report
                       </button>
-                      <button onClick={() => setShowReassignForm(inst._id)} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
+                      <button onClick={(e) => { e.stopPropagation(); setShowReassignForm(inst._id); }} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
                         <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign to Analyst
                       </button>
                     </div>

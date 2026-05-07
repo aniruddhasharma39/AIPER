@@ -44,8 +44,7 @@ router.get('/', protect, async (req, res) => {
 // Create a new job (LAB_HEAD only)
 router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
   try {
-    const { clientName, parameters } = req.body;
-    
+    const { customer, sample, compliance, parameters } = req.body;
     const jobCode = 'JOB-' + Math.floor(1000 + Math.random() * 9000);
 
     const hasMicro = parameters && parameters.some(p => p.type === 'Micro');
@@ -58,7 +57,11 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
 
     const job = await Job.create({
       jobCode,
-      clientName,
+      clientName: customer?.customer_name || 'Legacy Client',
+      totalSampleVolume: parseFloat(sample?.sample_quantity) || 0,
+      customer,
+      sample,
+      compliance,
       parameters,
       distribution,
       createdBy: req.user._id
@@ -68,7 +71,7 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
     await notifyAdmins({
       type: 'INFO',
       title: 'New Job Logged',
-      message: `Job ${jobCode} for client ${clientName} has been created.`,
+      message: `Job ${jobCode} for client ${customer?.customer_name} has been created.`,
       relatedJobId: job._id
     });
 
@@ -85,7 +88,6 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
         });
       }
     }
-    
     if (hasMacro) {
       const macroHeads = await User.find({ role: 'HEAD', department: { $regex: /^(macro|chemical)$/i } });
       for (const head of macroHeads) {
