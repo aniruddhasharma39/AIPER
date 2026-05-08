@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import { Bell, Check, Info, AlertTriangle, CheckCircle, Clock, Circle, X } from 'lucide-react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { AuthContext } from '../context/AuthContext';
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState([]);
@@ -9,6 +10,7 @@ export default function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
 
   const fetchNotifications = async () => {
     try {
@@ -90,7 +92,18 @@ export default function NotificationBell() {
       handleMarkAsRead(notification._id);
     }
     if (notification.link) {
-      navigate(notification.link);
+      let targetLink = notification.link;
+      
+      // Robust link normalization: if it's a relative path like "/review" or "/audit",
+      // prepend the correct dashboard prefix based on user role.
+      if (user && !targetLink.startsWith(`/${user.role.toLowerCase().replace('_', '-')}`)) {
+        const prefix = `/${user.role.toLowerCase().replace('_', '-')}`;
+        if (targetLink.startsWith('/review') || targetLink.startsWith('/audit') || targetLink.startsWith('/dispatcher')) {
+          targetLink = `${prefix}${targetLink}`;
+        }
+      }
+
+      navigate(targetLink);
       setIsOpen(false);
     }
   };
