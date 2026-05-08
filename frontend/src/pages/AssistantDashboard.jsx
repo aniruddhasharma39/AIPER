@@ -11,6 +11,7 @@ export default function AssistantDashboard() {
   const [testingPeriod, setTestingPeriod] = useState({ startDate: '', endDate: '' });
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.MY_TASKS));
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchTasks = async () => {
     try {
@@ -61,6 +62,8 @@ export default function AssistantDashboard() {
   };
 
   const handleIndividualSave = async (index) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     const updated = [...resultsData];
     if (!updated[index].value || updated[index].value.trim() === '') {
       updated[index].value = '0';
@@ -80,10 +83,14 @@ export default function AssistantDashboard() {
       console.error(err);
       updated[index].isSaved = false;
       setResultsData(updated);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleSaveProgress = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${activeTask._id}/save-progress`, {
         results: resultsData,
@@ -98,16 +105,21 @@ export default function AssistantDashboard() {
       setTimeout(() => setSuccess(''), 4000);
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const unsaved = resultsData.filter(r => !r.isSaved);
-    if (unsaved.length > 0) {
-      alert(`Please save all parameters before submitting. (${unsaved.length} remaining)`);
+    const hasAnyValue = resultsData.some(r => r.value && r.value.trim() !== '');
+    if (!hasAnyValue) {
+      alert("Please provide at least one result value before submitting for review.");
       return;
     }
+
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${activeTask._id}/results`, {
@@ -124,6 +136,8 @@ export default function AssistantDashboard() {
       setTimeout(() => setSuccess(''), 4000);
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -246,15 +260,15 @@ export default function AssistantDashboard() {
                             </div>
                           )}
                         </div>
-                        <button type="button" onClick={() => handleIndividualSave(i)} className="btn" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', backgroundColor: resItem.isSaved ? 'var(--color-success)' : 'var(--color-primary)', color: 'white', height: 'fit-content' }}>
-                          {resItem.isSaved ? <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><Check size={14}/> Saved</span> : 'Save Parameter'}
+                        <button type="button" onClick={() => handleIndividualSave(i)} disabled={isSubmitting} className="btn" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', backgroundColor: resItem.isSaved ? 'var(--color-success)' : 'var(--color-primary)', color: 'white', height: 'fit-content' }}>
+                          {resItem.isSaved ? <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><Check size={14}/> Saved</span> : (isSubmitting ? 'Saving...' : 'Save Parameter')}
                         </button>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                         <div>
                           <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 500, marginBottom: '0.3rem', color: 'var(--color-text-muted)' }}>Observed Result <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            <input type="text" value={resItem.value} onChange={e => handleResultChange(i, 'value', e.target.value)} required placeholder="Enter value…" style={inputStyle} />
+                            <input type="text" value={resItem.value} onChange={e => handleResultChange(i, 'value', e.target.value)} placeholder="Enter value…" style={inputStyle} />
                             <span style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', minWidth: '36px' }}>{resItem.unit}</span>
                           </div>
                         </div>
@@ -270,10 +284,10 @@ export default function AssistantDashboard() {
             </div>
 
             <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-              <button type="submit" className="btn btn-success" style={{ flex: 2, justifyContent: 'center' }}>
-                <Check size={18} style={{ marginRight: '0.5rem' }} /> Submit for Review
+              <button type="submit" className="btn btn-success" disabled={isSubmitting} style={{ flex: 2, justifyContent: 'center' }}>
+                <Check size={18} style={{ marginRight: '0.5rem' }} /> {isSubmitting ? 'Submitting...' : 'Submit for Review'}
               </button>
-              <button type="button" className="btn btn-primary" onClick={handleSaveProgress} style={{ flex: 1, justifyContent: 'center' }}>Save Draft</button>
+              <button type="button" className="btn btn-primary" onClick={handleSaveProgress} disabled={isSubmitting} style={{ flex: 1, justifyContent: 'center' }}>{isSubmitting ? 'Saving...' : 'Save Draft'}</button>
               <button type="button" className="btn" onClick={closeTask} style={{ flex: 1, justifyContent: 'center', backgroundColor: 'transparent', border: '1px solid var(--color-border)' }}>Cancel</button>
             </div>
           </form>
