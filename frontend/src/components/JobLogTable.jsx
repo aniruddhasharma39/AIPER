@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { Search, ChevronDown, ChevronRight, Filter, RotateCcw, FileText, Clock, Trash2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Search, ChevronDown, ChevronRight, Filter, Clock, Trash2 } from 'lucide-react';
 import JobTimeline from './JobTimeline';
 
 export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDeleteJob }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [expandedJobId, setExpandedJobId] = useState(null);
-  const navigate = useNavigate();
 
   // Helper to determine a simple global status for a job
   const getJobStatus = (job) => {
@@ -107,18 +105,6 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
                   <td>{new Date(job.createdAt).toLocaleDateString()}</td>
                   <td><StatusBadge status={getJobStatus(job)} /></td>
                   <td style={{ textAlign: 'right', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
-                    {getJobStatus(job) === 'COMPLETED' && (
-                      <>
-                        <button onClick={(e) => { e.stopPropagation(); navigate('/lab-head/audit'); }} className="btn btn-sm" style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem', backgroundColor: 'var(--color-primary)', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                          <FileText size={14} /> View Report
-                        </button>
-                        {onReopen && (
-                          <button onClick={(e) => { e.stopPropagation(); onReopen(job); }} className="btn btn-sm" style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <RotateCcw size={14} /> Reopen
-                          </button>
-                        )}
-                      </>
-                    )}
                     {onDeleteJob && (
                       <button 
                         onClick={(e) => { e.stopPropagation(); onDeleteJob(job._id); }} 

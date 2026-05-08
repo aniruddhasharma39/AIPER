@@ -4,7 +4,7 @@ import axios from 'axios';
 import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle, ClipboardCheck, RotateCcw } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
-import ReportViewer from '../components/ReportViewer';
+
 import JobLogTable from '../components/JobLogTable';
 import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
 import Spinner from '../components/Spinner';
@@ -669,7 +669,6 @@ export default function HeadDashboard() {
 function Audit() {
   const [instances, setInstances] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [selectedReport, setSelectedReport] = useState(null);
   const [auditLoading, setAuditLoading] = useState(
     () => !sessionStorage.getItem(CACHE_KEYS.INSTANCES) || !sessionStorage.getItem(CACHE_KEYS.JOBS)
   );
@@ -710,10 +709,6 @@ function Audit() {
 
   useEffect(() => { fetchData(); }, []);
 
-  if (selectedReport) {
-    return <ReportViewer report={selectedReport} onBack={() => setSelectedReport(null)} />;
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       <div>
@@ -736,14 +731,13 @@ function Audit() {
                 <th>Blueprint</th>
                 <th>Analyst</th>
                 <th>Date Completed</th>
-                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {auditLoading && instances.length === 0 ? (
-                <tr><td colSpan="6"><Spinner message="Loading completed tests..." /></td></tr>
+                <tr><td colSpan="5"><Spinner message="Loading completed tests..." /></td></tr>
               ) : instances.length === 0 ? (
-                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests in your department yet.</td></tr>
+                <tr><td colSpan="5" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>No completed tests in your department yet.</td></tr>
               ) : (
                 instances.map(inst => (
                   <tr key={inst._id}>
@@ -752,9 +746,6 @@ function Audit() {
                     <td>{inst.blueprintId?.name}</td>
                     <td>{inst.assignedTo?.name}</td>
                     <td>{new Date(inst.completedAt).toLocaleDateString()}</td>
-                    <td>
-                      <button onClick={() => setSelectedReport(inst)} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}>View PDF</button>
-                    </td>
                   </tr>
                 ))
               )}
