@@ -734,8 +734,8 @@ function Jobs() {
             </div>
 
             {/* ── SAMPLE INFORMATION ── */}
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div onClick={() => toggleSection('sample')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.sample ? 'var(--color-surface-hover)' : 'transparent' }}>
+            <div className="card" style={{ padding: 0, overflow: 'visible' }}>
+              <div onClick={() => toggleSection('sample')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.sample ? 'var(--color-surface-hover)' : 'transparent', borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   {sections.sample ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
                   <span style={{ fontWeight: 600 }}>Sample Information</span>
@@ -831,7 +831,7 @@ function Jobs() {
                           {searchResults.length === 0 && (
                             <div style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>No parameters found.</div>
                           )}
-                          <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); }}>
+                          <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); setSearchTerm(''); }}>
                             + Add New Parameter "{searchTerm}"
                           </div>
                         </div>
@@ -842,13 +842,13 @@ function Jobs() {
                     {showAddParam && (
                       <div style={{ padding: '1rem', border: '1px dashed var(--color-primary)', borderRadius: 'var(--radius-md)', maxWidth: '500px', marginBottom: '1.5rem' }}>
                         <h4 style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>Add New Parameter to Library</h4>
-                        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-                          <input style={{ flex: 2 }} type="text" value={newParam.name} onChange={e => setNewParam({ ...newParam, name: e.target.value })} placeholder="Parameter Name" required />
-                          <select style={{ flex: 1 }} value={newParam.type} onChange={e => setNewParam({ ...newParam, type: e.target.value })}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
+                          <input style={{ flex: '1 1 200px' }} type="text" value={newParam.name} onChange={e => setNewParam({ ...newParam, name: e.target.value })} placeholder="Parameter Name" required />
+                          <select style={{ flex: '1 1 100px' }} value={newParam.type} onChange={e => setNewParam({ ...newParam, type: e.target.value })}>
                             <option value="Micro">Micro</option>
                             <option value="Chemical">Chemical</option>
                           </select>
-                          <input style={{ flex: 1 }} type="text" value={newParam.unit} onChange={e => setNewParam({ ...newParam, unit: e.target.value })} placeholder="Unit" required />
+                          <input style={{ flex: '1 1 100px' }} type="text" value={newParam.unit} onChange={e => setNewParam({ ...newParam, unit: e.target.value })} placeholder="Unit" required />
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                           <button type="button" onClick={handleAddNewParam} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem' }}>Save & Select</button>
