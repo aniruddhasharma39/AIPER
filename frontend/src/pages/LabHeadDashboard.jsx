@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Settings, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, X, Calendar } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, X, Calendar } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
 import ReportViewer from '../components/ReportViewer';
 import { AuthContext } from '../context/AuthContext';
@@ -414,13 +414,9 @@ const BLANK_FORM = {
   sample_description: '', condition_on_receipt: '',
   packing_details: '', marking_seal: '', sample_source: '',
   received_date_dd: '', received_date_mm: '', received_date_yyyy: '', received_mode: 'Select', nabl_type: '', ulr_no: '',
-  test_parameters: [], test_param_input: '',
   // Compliance
   statement_of_conformity: '', decision_rule: '', accreditation_scope: '',
   disclaimer_notes: '', special_handling_instructions: '',
-  // Distribution
-  microRequired: false, microVolume: '', microAssignedTo: '',
-  macroRequired: false, macroVolume: '', macroAssignedTo: ''
 };
 
 // Helper: same format as backend buildJobCode — YYMMDD + 4-digit padded serial
@@ -439,23 +435,47 @@ function Jobs() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [heads, setHeads] = useState([]);
   const [formData, setFormData] = useState({ ...BLANK_FORM, reopenReason: '' });
   const [sections, setSections] = useState({ customer: true, sample: false, compliance: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nextSerial, setNextSerial] = useState(null); // 4-digit auto-increment serial
   const [reopenParentId, setReopenParentId] = useState(null);
 
+  // Parameter search state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedParams, setSelectedParams] = useState([]);
+  const [showAddParam, setShowAddParam] = useState(false);
+  const [newParam, setNewParam] = useState({ name: '', type: 'Micro', unit: 'mg/L' });
+
   const toggleSection = (s) => setSections(prev => ({ ...prev, [s]: !prev[s] }));
   const setField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
 
-  const addTestParam = () => {
-    const v = formData.test_param_input.trim();
-    if (v && !formData.test_parameters.includes(v)) {
-      setFormData(prev => ({ ...prev, test_parameters: [...prev.test_parameters, v], test_param_input: '' }));
+  const handleAddExistingParam = (param) => {
+    if (!selectedParams.find(p => p._id === param._id)) {
+      setSelectedParams([...selectedParams, param]);
+    }
+    setSearchTerm('');
+    setSearchResults([]);
+  };
+
+  const handleAddNewParam = async (e) => {
+    e.preventDefault();
+    if (!newParam.name || !newParam.unit) return alert('Name and Unit are required');
+    try {
+      const res = await axios.post('http://localhost:5000/api/parameters', newParam);
+      setSelectedParams([...selectedParams, res.data]);
+      setShowAddParam(false);
+      setNewParam({ name: '', type: 'Micro', unit: 'mg/L' });
+      setSearchTerm('');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error adding parameter');
     }
   };
-  const removeTestParam = (p) => setFormData(prev => ({ ...prev, test_parameters: prev.test_parameters.filter(x => x !== p) }));
+
+  const removeParam = (index) => {
+    setSelectedParams(selectedParams.filter((_, i) => i !== index));
+  };
 
   const fetchJobs = async () => {
     try {
@@ -468,13 +488,7 @@ function Jobs() {
   };
 
   const fetchHeads = async () => {
-    try {
-      await fetchWithCache(
-        'http://localhost:5000/api/users',
-        CACHE_KEYS.USERS,
-        (data) => setHeads(data.filter(u => u.role === 'HEAD'))
-      );
-    } catch (err) { console.error(err); }
+    // Heads fetch removed if not used for manual assignment
   };
 
   const fetchNextSerial = async () => {
@@ -489,9 +503,23 @@ function Jobs() {
 
   useEffect(() => { 
     fetchJobs(); 
-    fetchHeads(); 
     fetchNextSerial(); 
   }, []);
+
+  // Parameter search debounce
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchTerm.trim()) {
+        try {
+          const res = await axios.get(`http://localhost:5000/api/parameters?search=${searchTerm}`);
+          setSearchResults(res.data);
+        } catch (err) { console.error(err); }
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
 
   // Handle incoming Reopen request from JobLogTable
   useEffect(() => {
@@ -529,6 +557,7 @@ function Jobs() {
         reopenReason: ''
       });
       setReopenParentId(j._id);
+      setSelectedParams(j.parameters || []);
       setShowForm(true);
       setSections({ customer: true, sample: true, compliance: true });
       window.history.replaceState({}, document.title);
@@ -542,8 +571,8 @@ function Jobs() {
       e.currentTarget.reportValidity();
       return;
     }
-    if (formData.test_parameters.length === 0) {
-      alert("Please add at least one Test Required before submitting.");
+    if (selectedParams.length === 0) {
+      alert("Please add at least one Test Parameter before submitting.");
       return;
     }
     if (reopenParentId && !formData.reopenReason?.trim()) {
@@ -566,17 +595,12 @@ function Jobs() {
       }
       const parsedDate = `${yInt}-${String(mInt).padStart(2, '0')}-${String(dInt).padStart(2, '0')}`;
       
-      let finalMicroAssignedTo = formData.microAssignedTo;
-      if (formData.microRequired && !finalMicroAssignedTo) {
-        const microHeads = heads.filter(h => h.department === 'Micro');
-        if (microHeads.length > 0) finalMicroAssignedTo = microHeads[0]._id;
-      }
-      
-      let finalMacroAssignedTo = formData.macroAssignedTo;
-      if (formData.macroRequired && !finalMacroAssignedTo) {
-        const macroHeads = heads.filter(h => h.department === 'Macro');
-        if (macroHeads.length > 0) finalMacroAssignedTo = macroHeads[0]._id;
-      }
+      const parameters = selectedParams.map(p => ({
+        parameterId: p._id,
+        name: p.name,
+        type: p.type,
+        unit: p.unit
+      }));
 
       const payload = {
         customer: {
@@ -609,10 +633,7 @@ function Jobs() {
           disclaimer_notes: formData.disclaimer_notes,
           special_handling_instructions: formData.special_handling_instructions
         },
-        distribution: {
-          micro: { required: formData.microRequired, volume: parseFloat(formData.microVolume) || 0, assignedTo: finalMicroAssignedTo || undefined },
-          macro: { required: formData.macroRequired, volume: parseFloat(formData.macroVolume) || 0, assignedTo: finalMacroAssignedTo || undefined }
-        }
+        parameters
       };
 
       if (reopenParentId) {
@@ -625,6 +646,7 @@ function Jobs() {
       setShowForm(false);
       setFormData({ ...BLANK_FORM, reopenReason: '' });
       setReopenParentId(null);
+      setSelectedParams([]);
       invalidateCache(CACHE_KEYS.JOBS);
       fetchJobs();
       fetchNextSerial();
@@ -790,17 +812,76 @@ function Jobs() {
                     <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>ULR <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.ulr_no} onChange={e => setField('ulr_no', e.target.value)} required /></div>
                   )}
                   <div style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Tests Required <span style={{color:'var(--color-danger)'}}>*</span></label>
-                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.8rem' }}>
-                      <input name="test_param_input" placeholder="Type a parameter and press Enter" value={formData.test_param_input} onChange={e => setField('test_param_input', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTestParam(); }}} style={{ flex: 1 }} />
-                      <button type="button" className="btn btn-primary" onClick={addTestParam}>Add</button>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Search & Add Test Parameters <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <div style={{ position: 'relative', marginBottom: '1rem' }}>
+                      <input 
+                        placeholder="Type to search (e.g. Moisture, Salmonella...)" 
+                        value={searchTerm} 
+                        onChange={e => setSearchTerm(e.target.value)}
+                        style={{ width: '100%' }}
+                      />
+                      {searchTerm.trim() && (
+                        <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', maxWidth: '420px', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', zIndex: 20, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto' }}>
+                          {searchResults.map(p => (
+                            <div key={p._id} onClick={() => handleAddExistingParam(p)} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between' }}>
+                              <span>{p.name}</span>
+                              <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type} · {p.unit}</span>
+                            </div>
+                          ))}
+                          {searchResults.length === 0 && (
+                            <div style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>No parameters found.</div>
+                          )}
+                          <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); }}>
+                            + Add New Parameter "{searchTerm}"
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
-                      {formData.test_parameters.map(p => (
-                        <span key={p} className="badge badge-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          {p} <X size={12} style={{ cursor: 'pointer' }} onClick={() => removeTestParam(p)} />
-                        </span>
-                      ))}
+
+                    {/* New param form */}
+                    {showAddParam && (
+                      <div style={{ padding: '1rem', border: '1px dashed var(--color-primary)', borderRadius: 'var(--radius-md)', maxWidth: '500px', marginBottom: '1.5rem' }}>
+                        <h4 style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>Add New Parameter to Library</h4>
+                        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                          <input style={{ flex: 2 }} type="text" value={newParam.name} onChange={e => setNewParam({ ...newParam, name: e.target.value })} placeholder="Parameter Name" required />
+                          <select style={{ flex: 1 }} value={newParam.type} onChange={e => setNewParam({ ...newParam, type: e.target.value })}>
+                            <option value="Micro">Micro</option>
+                            <option value="Chemical">Chemical</option>
+                          </select>
+                          <input style={{ flex: 1 }} type="text" value={newParam.unit} onChange={e => setNewParam({ ...newParam, unit: e.target.value })} placeholder="Unit" required />
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button type="button" onClick={handleAddNewParam} className="btn btn-primary" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem' }}>Save & Select</button>
+                          <button type="button" onClick={() => setShowAddParam(false)} className="btn" style={{ padding: '0.3rem 0.8rem', fontSize: '0.85rem', border: '1px solid var(--color-border)' }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Selected parameters pills */}
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, fontSize: '0.9rem' }}>Selected Parameters</label>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        {selectedParams.length === 0 ? <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>None selected</span> : null}
+                        {selectedParams.map((p, index) => (
+                          <div key={index} style={{
+                            display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.8rem', borderRadius: '9999px', fontSize: '0.85rem', fontWeight: 500,
+                            backgroundColor: p.type === 'Micro' ? '#dcfce7' : '#e0f2fe',
+                            color: p.type === 'Micro' ? '#166534' : '#075985',
+                            border: `1px solid ${p.type === 'Micro' ? '#bbf7d0' : '#bae6fd'}`
+                          }}>
+                            {p.name} ({p.unit})
+                            <button type="button" onClick={() => removeParam(index)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      {selectedParams.length > 0 && (
+                        <div style={{ marginTop: '0.8rem', fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <Activity size={14} /> 
+                          {selectedParams.filter(p => p.type === 'Micro').length} Micro · {selectedParams.filter(p => p.type === 'Chemical').length} Chemical — departments auto-assigned
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -827,43 +908,8 @@ function Jobs() {
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: '1.5rem' }}>
-              <div className={`selectable-card ${formData.microRequired ? 'selected' : ''}`} onClick={() => setFormData(prev => ({ ...prev, microRequired: !prev.microRequired }))} style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-                <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to Micro</span>
-                  {formData.microRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
-                </div>
-                {formData.microRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity</label><input type="number" step="0.01" value={formData.microVolume} onChange={e => setField('microVolume', e.target.value)} /></div>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head <span style={{color:'var(--color-danger)'}}>*</span></label>
-                      <select value={formData.microAssignedTo} onChange={e => setField('microAssignedTo', e.target.value)} required>
-                        {heads.filter(h => h.department === 'Micro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className={`selectable-card ${formData.macroRequired ? 'selected' : ''}`} onClick={() => setFormData(prev => ({ ...prev, macroRequired: !prev.macroRequired }))} style={{ flex: 1, padding: '1.5rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-                <div style={{ fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Distribute to Chemical</span>
-                  {formData.macroRequired && <div style={{ width: '12px', height: '12px', background: 'var(--color-primary)', borderRadius: '50%' }}></div>}
-                </div>
-                {formData.macroRequired && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} onClick={e => e.stopPropagation()}>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Sample Quantity</label><input type="number" step="0.01" value={formData.macroVolume} onChange={e => setField('macroVolume', e.target.value)} /></div>
-                    <div><label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assign To Head <span style={{color:'var(--color-danger)'}}>*</span></label>
-                      <select value={formData.macroAssignedTo} onChange={e => setField('macroAssignedTo', e.target.value)} required>
-                        {heads.filter(h => h.department === 'Macro').map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={(!formData.microRequired && !formData.macroRequired) || isSubmitting}>
-              {isSubmitting ? 'Processing...' : (reopenParentId ? 'Submit Retest' : 'Create Job')}
+            <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '0.8rem 2rem' }} disabled={isSubmitting}>
+              {isSubmitting ? 'Processing...' : (reopenParentId ? 'Save Retest Job' : 'Create Job & Dispatch')}
             </button>
           </form>
         </div>
@@ -1082,38 +1128,14 @@ function LabReviewQueue() {
 }
 
 export default function LabHeadDashboard() {
-  const { user } = useContext(AuthContext);
   return (
-    <div className="dashboard-layout">
-      <nav className="sidebar">
-        <div className="sidebar-header" style={{ padding: '1.5rem', borderBottom: '1px solid var(--color-border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-            <div style={{ width: '32px', height: '32px', background: 'linear-gradient(135deg, var(--color-primary), #3b82f6)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-              <Activity size={18} />
-            </div>
-            <span style={{ fontWeight: 800, fontSize: '1.2rem', letterSpacing: '-0.02em', color: 'var(--color-text-main)' }}>LAB HEAD</span>
-          </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', margin: 0 }}>{user?.email}</p>
-        </div>
-        <div className="sidebar-content" style={{ padding: '1rem' }}>
-          <Link to="/lab-head" className="nav-link"><Activity size={18} /> Dashboard</Link>
-          <Link to="/lab-head/jobs" className="nav-link"><Clock size={18} /> Job Distributor</Link>
-          <Link to="/lab-head/review" className="nav-link"><ClipboardCheck size={18} /> Review Queue</Link>
-          <Link to="/lab-head/audit" className="nav-link"><FileText size={18} /> Audit Logs</Link>
-          <Link to="/lab-head/users" className="nav-link"><UsersIcon size={18} /> User Management</Link>
-          <Link to="/lab-head/settings" className="nav-link"><Settings size={18} /> System Settings</Link>
-        </div>
-      </nav>
-      <main className="dashboard-main" style={{ padding: '2.5rem' }}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/jobs" element={<Jobs />} />
-          <Route path="/review" element={<LabReviewQueue />} />
-          <Route path="/audit" element={<Audit />} />
-          <Route path="/users" element={<UsersPage />} />
-          <Route path="/settings" element={<div>System Settings Page</div>} />
-        </Routes>
-      </main>
-    </div>
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/jobs" element={<Jobs />} />
+      <Route path="/review" element={<LabReviewQueue />} />
+      <Route path="/audit" element={<Audit />} />
+      <Route path="/users" element={<UsersPage />} />
+      <Route path="/settings" element={<div>System Settings Page</div>} />
+    </Routes>
   );
 }
