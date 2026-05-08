@@ -724,11 +724,11 @@ function Jobs() {
               {sections.customer && (
                 <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Name <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.customer_name} onChange={e => setField('customer_name', e.target.value)} required /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Mobile Number <span style={{color:'var(--color-danger)'}}>*</span></label><input value={formData.mobile_number} onChange={e => setField('mobile_number', e.target.value)} required /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Mobile Number <span style={{color:'var(--color-danger)'}}>*</span></label><input type="tel" inputMode="numeric" maxLength={10} pattern="[0-9]{10}" title="Enter exactly 10 digits" value={formData.mobile_number} onChange={e => setField('mobile_number', e.target.value.replace(/[^0-9]/g, '').slice(0, 10))} required /></div>
                   <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Address <span style={{color:'var(--color-danger)'}}>*</span></label><input type="text" value={formData.customer_address} onChange={e => setField('customer_address', e.target.value)} required style={{ width: '100%' }} /></div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Contact Person</label><input value={formData.contact_person} onChange={e => setField('contact_person', e.target.value)} /></div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Email</label><input type="email" value={formData.email} onChange={e => setField('email', e.target.value)} /></div>
-                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Reference No.</label><input value={formData.customer_reference_no} onChange={e => setField('customer_reference_no', e.target.value)} /></div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Customer Reference No.</label><input inputMode="numeric" pattern="[0-9]*" title="Numbers only" value={formData.customer_reference_no} onChange={e => setField('customer_reference_no', e.target.value.replace(/[^0-9]/g, ''))} /></div>
                 </div>
               )}
             </div>
@@ -757,7 +757,7 @@ function Jobs() {
                   </div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Quantity <span style={{color:'var(--color-danger)'}}>*</span></label>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <input type="number" step="0.01" value={formData.sample_quantity} onChange={e => setField('sample_quantity', e.target.value)} required style={{ flex: 1 }} />
+                      <input type="number" step="0.01" min="0" value={formData.sample_quantity} onChange={e => setField('sample_quantity', e.target.value)} required style={{ flex: 1 }} />
                       <input type="text" placeholder="Unit" value={formData.sample_quantity_unit} onChange={e => setField('sample_quantity_unit', e.target.value)} required style={{ width: '90px' }} />
                     </div>
                   </div>
