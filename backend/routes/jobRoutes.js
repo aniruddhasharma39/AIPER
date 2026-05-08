@@ -137,7 +137,8 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
           type: 'ACTION_REQUIRED',
           title: 'New Job Available',
           message: `Job ${jobCode} requires MICRO analysis. Child code: ${jobCode}-1`,
-          relatedJobId: job._id
+          relatedJobId: job._id,
+          link: '/head/dispatcher'
         });
       }
     }
@@ -150,7 +151,8 @@ router.post('/', protect, authorize('LAB_HEAD'), async (req, res) => {
           type: 'ACTION_REQUIRED',
           title: 'New Job Available',
           message: `Job ${jobCode} requires CHEMICAL analysis. Child code: ${jobCode}-2`,
-          relatedJobId: job._id
+          relatedJobId: job._id,
+          link: '/head/dispatcher'
         });
       }
     }
@@ -222,13 +224,13 @@ router.post('/:id/retest', protect, authorize('LAB_HEAD'), async (req, res) => {
     if (hasMicro) {
       const microHeads = await User.find({ role: 'HEAD', department: { $regex: /^micro/i } });
       for (const head of microHeads) {
-        await createNotification({ recipient: head._id, type: 'ACTION_REQUIRED', title: 'Retest Available', message: `Job ${jobCode} requires MICRO retest.`, relatedJobId: job._id });
+        await createNotification({ recipient: head._id, type: 'ACTION_REQUIRED', title: 'Retest Available', message: `Job ${jobCode} requires MICRO retest.`, relatedJobId: job._id, link: '/head/dispatcher' });
       }
     }
     if (hasMacro) {
       const macroHeads = await User.find({ role: 'HEAD', department: { $regex: /^(macro|chemical)$/i } });
       for (const head of macroHeads) {
-        await createNotification({ recipient: head._id, type: 'ACTION_REQUIRED', title: 'Retest Available', message: `Job ${jobCode} requires CHEMICAL retest.`, relatedJobId: job._id });
+        await createNotification({ recipient: head._id, type: 'ACTION_REQUIRED', title: 'Retest Available', message: `Job ${jobCode} requires CHEMICAL retest.`, relatedJobId: job._id, link: '/head/dispatcher' });
       }
     }
 

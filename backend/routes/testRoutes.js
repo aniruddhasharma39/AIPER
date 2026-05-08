@@ -121,7 +121,8 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
         title: 'New Test Assigned',
         message: `You have been assigned test ${testCode} for job ${job.jobCode}.`,
         relatedJobId: jobId,
-        relatedInstanceId: instance._id
+        relatedInstanceId: instance._id,
+        link: '/assistant'
       });
     }
 
@@ -203,7 +204,7 @@ router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req
       message: `Analyst has submitted results for test ${instance.testCode}. Pending your review.`,
       relatedJobId: instance.jobId,
       relatedInstanceId: instance._id,
-      link: '/review'
+      link: '/head/review'
     });
 
     res.json(instance);
@@ -255,7 +256,7 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
         message: `HEAD has approved test ${instance.testCode}. Pending your final review.`,
         relatedJobId: instance.jobId,
         relatedInstanceId: instance._id,
-        link: '/review'
+        link: '/lab-head/review'
       });
     } else {
       await createNotification({
@@ -264,7 +265,8 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
         title: 'Job Reassigned',
         message: `Your results for test ${instance.testCode} were rejected by HEAD. Please revise.`,
         relatedJobId: instance.jobId,
-        relatedInstanceId: instance._id
+        relatedInstanceId: instance._id,
+        link: '/assistant'
       });
 
       await notifyLabHeads({
@@ -347,7 +349,7 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
         message: `Test ${instance.testCode} has been approved and completed. Report generated.`,
         relatedJobId: instance.jobId,
         relatedInstanceId: instance._id,
-        link: '/audit'
+        link: '/lab-head/audit'
       });
       await notifyAdmins({
         type: 'SUCCESS',
@@ -363,7 +365,8 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
         title: 'Job Reassigned',
         message: `Your results for test ${instance.testCode} were rejected by LAB_HEAD. Please revise.`,
         relatedJobId: instance.jobId,
-        relatedInstanceId: instance._id
+        relatedInstanceId: instance._id,
+        link: '/assistant'
       });
     }
 
