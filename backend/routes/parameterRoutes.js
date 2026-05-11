@@ -1,16 +1,49 @@
 const express = require('express');
 const router = express.Router();
 const Parameter = require('../models/Parameter');
+const Job = require('../models/Job');
 const { protect } = require('../middlewares/authMiddleware');
 
-// Get all parameters, optionally search by name
+// Get all parameters, optionally search by name (ranked by relevance)
 router.get('/', protect, async (req, res) => {
   try {
     const query = {};
-    if (req.query.search) {
-      query.name = { $regex: req.query.search, $options: 'i' };
+    const searchTerm = req.query.search;
+    if (searchTerm) {
+      query.name = { $regex: searchTerm, $options: 'i' };
     }
     const parameters = await Parameter.find(query).sort({ name: 1 });
+
+    // Rank results by relevance if a search term was provided
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      parameters.sort((a, b) => {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+
+        // Tier 1: Exact match
+        const aExact = aName === term;
+        const bExact = bName === term;
+        if (aExact && !bExact) return -1;
+        if (bExact && !aExact) return 1;
+
+        // Tier 2: Starts with search term
+        const aPrefix = aName.startsWith(term);
+        const bPrefix = bName.startsWith(term);
+        if (aPrefix && !bPrefix) return -1;
+        if (bPrefix && !aPrefix) return 1;
+
+        // Tier 3: Word boundary match (e.g. "Total Coliform" matches "col")
+        const aWord = aName.split(/\s+/).some(w => w.startsWith(term));
+        const bWord = bName.split(/\s+/).some(w => w.startsWith(term));
+        if (aWord && !bWord) return -1;
+        if (bWord && !aWord) return 1;
+
+        // Tier 4: Alphabetical
+        return aName.localeCompare(bName);
+      });
+    }
+
     res.json(parameters);
   } catch (err) {
     res.status(500).json({ message: 'Error fetching parameters', error: err.message });
@@ -39,6 +72,30 @@ router.post('/', protect, async (req, res) => {
     res.status(201).json(parameter);
   } catch (err) {
     res.status(500).json({ message: 'Error creating parameter', error: err.message });
+  }
+});
+
+// Delete a parameter from the library
+router.delete('/:id', protect, async (req, res) => {
+  try {
+    const paramId = req.params.id;
+
+    // Check if any job references this parameter
+    const usageCount = await Job.countDocuments({ 'parameters.parameterId': paramId });
+    if (usageCount > 0) {
+      return res.status(400).json({
+        message: `Cannot delete: this parameter is used in ${usageCount} job(s). Remove it from those jobs first.`
+      });
+    }
+
+    const deleted = await Parameter.findByIdAndDelete(paramId);
+    if (!deleted) {
+      return res.status(404).json({ message: 'Parameter not found' });
+    }
+
+    res.json({ message: `Parameter "${deleted.name}" deleted successfully` });
+  } catch (err) {
+    res.status(500).json({ message: 'Error deleting parameter', error: err.message });
   }
 });
 

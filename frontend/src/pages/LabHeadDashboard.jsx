@@ -11,10 +11,9 @@ import Spinner from '../components/Spinner';
 function Dashboard() {
   const { user } = useContext(AuthContext);
   const [stats, setStats] = useState({
-    pendingDispatch: 0,
-    inProgress: 0,
-    completed: 0,
-    totalAssistants: 0
+    ongoingJobs: 0,
+    completedJobs: 0,
+    activeAnalysts: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
   const [statsLoading, setStatsLoading] = useState(
@@ -32,17 +31,20 @@ function Dashboard() {
         const cachedUsers = sessionStorage.getItem(CACHE_KEYS.USERS);
 
         const computeStats = (jobs, instances, users) => {
-          let pending = 0;
-          jobs.forEach(j => {
-            if (j.distribution?.micro?.status === 'PENDING') pending++;
-            if (j.distribution?.macro?.status === 'PENDING') pending++;
-          });
-          setStats({
-            pendingDispatch: pending,
-            inProgress: instances.filter(i => i.status === 'PENDING' && i.assignedTo != null).length,
-            completed: instances.filter(i => i.status === 'COMPLETED').length,
-            totalAssistants: users.filter(u => u.role === 'ASSISTANT').length
-          });
+          const ongoingJobs = jobs.filter(j => {
+            const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+            const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
+            return !(microDone && macroDone);
+          }).length;
+          const completedJobs = jobs.filter(j => {
+            const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+            const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
+            return microDone && macroDone;
+          }).length;
+          const activeAnalysts = new Set(
+            instances.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
+          ).size;
+          setStats({ ongoingJobs, completedJobs, activeAnalysts });
           setRecentActivity(
             [...instances].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 5)
           );
@@ -89,44 +91,31 @@ function Dashboard() {
 
   return (
     <div>
-      <div style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Lab Head Command Center</h1>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '1rem' }}>Global Laboratory Intelligence</p>
-        </div>
-        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textAlign: 'right' }}>
-          Real-time Telemetry Active <div style={{ display: 'inline-block', width: '8px', height: '8px', background: 'var(--color-success)', borderRadius: '50%', marginLeft: '0.5rem' }}></div>
-        </div>
+      <div style={{ marginBottom: '2.5rem' }}>
+        <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Lab Head Dashboard</h1>
       </div>
 
       <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
         <StatCard 
-          icon={Clock} 
-          title="Awaiting Dispatch" 
-          value={stats.pendingDispatch} 
-          color="var(--color-warning)" 
-          subtitle="New samples to assign" 
-        />
-        <StatCard 
           icon={Activity} 
-          title="Live Analysis" 
-          value={stats.inProgress} 
+          title="Ongoing Jobs" 
+          value={stats.ongoingJobs} 
           color="var(--color-primary)" 
-          subtitle="Processing in lab" 
+          subtitle="Currently in progress" 
         />
         <StatCard 
           icon={CheckCircle} 
-          title="Archive Ready" 
-          value={stats.completed} 
+          title="Completed Jobs" 
+          value={stats.completedJobs} 
           color="var(--color-success)" 
-          subtitle="Completed reports" 
+          subtitle="Fully completed" 
         />
         <StatCard 
           icon={UsersIcon} 
           title="Active Analysts" 
-          value={stats.totalAssistants} 
+          value={stats.activeAnalysts} 
           color="#8B5CF6" 
-          subtitle="Available for tasks" 
+          subtitle="Currently working on jobs" 
         />
       </div>
 
@@ -135,7 +124,6 @@ function Dashboard() {
           <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Activity size={18} /> Recent Pipeline Activity
           </h3>
-          <Link to="/lab-head/audit" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 500 }}>View Detailed Logs &rarr;</Link>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -475,6 +463,20 @@ function Jobs() {
 
   const removeParam = (index) => {
     setSelectedParams(selectedParams.filter((_, i) => i !== index));
+  };
+
+  const handleDeleteParam = async (e, param) => {
+    e.stopPropagation(); // Don't trigger the row click (add)
+    if (!window.confirm(`Delete "${param.name}" from the parameter library permanently?`)) return;
+    try {
+      await axios.delete(`http://localhost:5000/api/parameters/${param._id}`);
+      // Remove from search results
+      setSearchResults(prev => prev.filter(p => p._id !== param._id));
+      // Also remove from selected if it was picked
+      setSelectedParams(prev => prev.filter(p => p._id !== param._id));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error deleting parameter');
+    }
   };
 
   const fetchJobs = async () => {
@@ -823,9 +825,21 @@ function Jobs() {
                       {searchTerm.trim() && (
                         <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', maxWidth: '420px', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', zIndex: 20, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto' }}>
                           {searchResults.map(p => (
-                            <div key={p._id} onClick={() => handleAddExistingParam(p)} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between' }}>
-                              <span>{p.name}</span>
-                              <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type} · {p.unit}</span>
+                            <div key={p._id} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div onClick={() => handleAddExistingParam(p)} style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>{p.name}</span>
+                                <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type} · {p.unit}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteParam(e, p)}
+                                title={`Delete "${p.name}" from library`}
+                                style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.2rem 0.4rem', marginLeft: '0.5rem', display: 'flex', alignItems: 'center', opacity: 0.6 }}
+                                onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                                onMouseLeave={e => e.currentTarget.style.opacity = 0.6}
+                              >
+                                <Trash2 size={14} />
+                              </button>
                             </div>
                           ))}
                           {searchResults.length === 0 && (
@@ -951,9 +965,21 @@ function Audit() {
         <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <FileText size={28} style={{ color: 'var(--color-primary)' }} /> Global Job Logs & Reports
         </h1>
-        <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>
-          Expand a job row to view its complete telemetry, retest cycles, and download final reports.
-        </p>
+        <div style={{ 
+          backgroundColor: 'var(--color-surface-hover)', 
+          borderLeft: '4px solid var(--color-primary)', 
+          padding: '1rem 1.5rem', 
+          borderRadius: 'var(--radius-md)',
+          marginBottom: '2rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem'
+        }}>
+          <Clock size={20} style={{ color: 'var(--color-primary)' }} />
+          <div style={{ fontSize: '0.95rem', color: 'var(--color-text-main)', fontWeight: 500 }}>
+            Click on any job row below to view its full lifecycle history, retest cycles, and download final reports.
+          </div>
+        </div>
         <JobLogTable
           jobs={jobs}
           title="Lifecycle Tracker"

@@ -11,10 +11,9 @@ import Spinner from '../components/Spinner';
 function Dashboard() {
   const { user } = useContext(AuthContext);
   const [stats, setStats] = useState({
-    pendingDispatch: 0,
-    inProgress: 0,
-    completed: 0,
-    totalAssistants: 0
+    ongoingJobs: 0,
+    completedJobs: 0,
+    activeAnalysts: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
   const [statsLoading, setStatsLoading] = useState(
@@ -30,18 +29,21 @@ function Dashboard() {
           axios.get('http://localhost:5000/api/users')
         ]);
 
-        let pending = 0;
-        jobsRes.data.forEach(j => {
-          if (j.distribution?.micro?.status === 'PENDING') pending++;
-          if (j.distribution?.macro?.status === 'PENDING') pending++;
-        });
+        const ongoingJobs = jobsRes.data.filter(j => {
+          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
+          return !(microDone && macroDone);
+        }).length;
+        const completedJobs = jobsRes.data.filter(j => {
+          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
+          return microDone && macroDone;
+        }).length;
+        const activeAnalysts = new Set(
+          instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
+        ).size;
 
-        setStats({
-          pendingDispatch: pending,
-          inProgress: instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo != null).length,
-          completed: instancesRes.data.filter(i => i.status === 'COMPLETED').length,
-          totalAssistants: usersRes.data.filter(u => u.role === 'ASSISTANT').length
-        });
+        setStats({ ongoingJobs, completedJobs, activeAnalysts });
 
         const sortedInstances = instancesRes.data
           .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
@@ -74,44 +76,31 @@ function Dashboard() {
 
   return (
     <div>
-      <div style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Admin Command Center</h1>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '1rem' }}>Global System Intelligence</p>
-        </div>
-        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textAlign: 'right' }}>
-          Real-time Telemetry Active <div style={{ display: 'inline-block', width: '8px', height: '8px', background: 'var(--color-success)', borderRadius: '50%', marginLeft: '0.5rem' }}></div>
-        </div>
+      <div style={{ marginBottom: '2.5rem' }}>
+        <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Admin Dashboard</h1>
       </div>
 
       <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
         <StatCard 
-          icon={Clock} 
-          title="Awaiting Dispatch" 
-          value={stats.pendingDispatch} 
-          color="var(--color-warning)" 
-          subtitle="New samples to assign" 
-        />
-        <StatCard 
           icon={Activity} 
-          title="Live Analysis" 
-          value={stats.inProgress} 
+          title="Ongoing Jobs" 
+          value={stats.ongoingJobs} 
           color="var(--color-primary)" 
-          subtitle="Processing in lab" 
+          subtitle="Currently in progress" 
         />
         <StatCard 
           icon={CheckCircle} 
-          title="Archive Ready" 
-          value={stats.completed} 
+          title="Completed Jobs" 
+          value={stats.completedJobs} 
           color="var(--color-success)" 
-          subtitle="Completed reports" 
+          subtitle="Fully completed" 
         />
         <StatCard 
           icon={UsersIcon} 
           title="Active Analysts" 
-          value={stats.totalAssistants} 
+          value={stats.activeAnalysts} 
           color="#8B5CF6" 
-          subtitle="Available for tasks" 
+          subtitle="Currently working on jobs" 
         />
       </div>
 
@@ -120,7 +109,6 @@ function Dashboard() {
           <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Activity size={18} /> Recent Pipeline Activity
           </h3>
-          <Link to="/admin/audit" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 500 }}>View Detailed Logs &rarr;</Link>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -413,12 +401,27 @@ function Audit() {
         <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <FileText size={28} style={{ color: 'var(--color-primary)' }} /> Super Admin Tracker
         </h1>
+        <div style={{ 
+          backgroundColor: 'var(--color-surface-hover)', 
+          borderLeft: '4px solid var(--color-primary)', 
+          padding: '1rem 1.5rem', 
+          borderRadius: 'var(--radius-md)',
+          marginBottom: '2rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem'
+        }}>
+          <Clock size={20} style={{ color: 'var(--color-primary)' }} />
+          <div style={{ fontSize: '0.95rem', color: 'var(--color-text-main)', fontWeight: 500 }}>
+            Click on any job row below to view its full lifecycle history, retest cycles, and download final reports.
+          </div>
+        </div>
         <JobLogTable jobs={jobs} title="Global Job Lifecycle Logs" />
       </div>
 
       <div>
         <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          PDF Reports & Completed Audit
+          Completed Activity
         </h2>
         <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
           <table>

@@ -308,11 +308,25 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
     if (action === 'APPROVE') {
       instance.status = 'COMPLETED';
       instance.completedAt = new Date();
+    } else {
+      // REASSIGN: snapshot results, wipe values, back to PENDING
+      instance.previousResults = instance.results.map(r => ({ ...r.toObject() }));
+      instance.results = instance.results.map(r => ({
+        ...r.toObject(),
+        value: ''
+      }));
+      instance.status = 'PENDING';
+    }
 
-      // Only now update job distribution status to COMPLETED
+    // Save instance FIRST so that the database reflects the new status
+    // before we query all instances to compute job-level completion
+    await instance.save();
+
+    if (action === 'APPROVE') {
+      // Now update job distribution status to COMPLETED
       const job = await Job.findById(instance.jobId);
       if (job) {
-        // Find all instances for this job
+        // Find all instances for this job (this now sees the saved COMPLETED status)
         const allInstances = await TestInstance.find({ jobId: instance.jobId }).populate('createdBy', 'department');
         
         // Helper to check if all instances created by a specific department are completed
@@ -330,17 +344,7 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
         }
         await job.save();
       }
-    } else {
-      // REASSIGN: snapshot results, wipe values, back to PENDING
-      instance.previousResults = instance.results.map(r => ({ ...r.toObject() }));
-      instance.results = instance.results.map(r => ({
-        ...r.toObject(),
-        value: ''
-      }));
-      instance.status = 'PENDING';
     }
-
-    await instance.save();
 
     if (action === 'APPROVE') {
       await notifyLabHeads({

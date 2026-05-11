@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle, ClipboardCheck, RotateCcw } from 'lucide-react';
+import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
@@ -12,10 +12,9 @@ import Spinner from '../components/Spinner';
 function Dashboard() {
   const { user } = useContext(AuthContext);
   const [stats, setStats] = useState({
-    pendingDispatch: 0,
-    inProgress: 0,
-    completed: 0,
-    totalAssistants: 0
+    ongoingJobs: 0,
+    completedJobs: 0,
+    activeAnalysts: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
   const [statsLoading, setStatsLoading] = useState(
@@ -32,13 +31,22 @@ function Dashboard() {
         ]);
 
         const dept = user?.department?.toLowerCase() || '';
-        
-        setStats({
-          pendingDispatch: jobsRes.data.filter(j => j.distribution[dept]?.status === 'PENDING').length,
-          inProgress: instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo != null).length,
-          completed: instancesRes.data.filter(i => i.status === 'COMPLETED').length,
-          totalAssistants: usersRes.data.filter(u => u.role === 'ASSISTANT' && u.department === user.department).length
-        });
+
+        const ongoingJobs = jobsRes.data.filter(j => {
+          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
+          return !(microDone && macroDone);
+        }).length;
+        const completedJobs = jobsRes.data.filter(j => {
+          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
+          return microDone && macroDone;
+        }).length;
+        const activeAnalysts = new Set(
+          instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
+        ).size;
+
+        setStats({ ongoingJobs, completedJobs, activeAnalysts });
 
         // Get latest 5 activities in this department
         const sortedInstances = instancesRes.data
@@ -73,44 +81,31 @@ function Dashboard() {
 
   return (
     <div>
-      <div style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Department Control Center</h1>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '1rem' }}>Unit {user?.department} | {user?.branch} Intelligence</p>
-        </div>
-        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textAlign: 'right' }}>
-          Real-time Telemetry Active <div style={{ display: 'inline-block', width: '8px', height: '8px', background: 'var(--color-success)', borderRadius: '50%', marginLeft: '0.5rem' }}></div>
-        </div>
+      <div style={{ marginBottom: '2.5rem' }}>
+        <h1 style={{ marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Head Dashboard</h1>
       </div>
 
       <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
         <StatCard 
-          icon={Clock} 
-          title="Awaiting Dispatch" 
-          value={stats.pendingDispatch} 
-          color="var(--color-warning)" 
-          subtitle="New samples to assign" 
-        />
-        <StatCard 
           icon={Activity} 
-          title="Live Analysis" 
-          value={stats.inProgress} 
+          title="Ongoing Jobs" 
+          value={stats.ongoingJobs} 
           color="var(--color-primary)" 
-          subtitle="Processing in lab" 
+          subtitle="Currently in progress" 
         />
         <StatCard 
           icon={CheckCircle} 
-          title="Archive Ready" 
-          value={stats.completed} 
+          title="Completed Jobs" 
+          value={stats.completedJobs} 
           color="var(--color-success)" 
-          subtitle="Completed reports" 
+          subtitle="Fully completed" 
         />
         <StatCard 
           icon={Users} 
           title="Active Analysts" 
-          value={stats.totalAssistants} 
+          value={stats.activeAnalysts} 
           color="#8B5CF6" 
-          subtitle="Available for tasks" 
+          subtitle="Currently working on jobs" 
         />
       </div>
 
@@ -119,7 +114,6 @@ function Dashboard() {
           <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Activity size={18} /> Recent Pipeline Activity
           </h3>
-          <Link to="/head/audit" style={{ fontSize: '0.85rem', color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 500 }}>View Detailed Logs &rarr;</Link>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -325,12 +319,12 @@ function Dispatcher() {
   const [jobs, setJobs] = useState([]);
   const { user } = useContext(AuthContext);
 
-  const [formData, setFormData] = useState({
-    jobId: '', deadline: ''
-  });
-  const [assignments, setAssignments] = useState({}); // parameterId -> assistantId
+  const [expandedJobId, setExpandedJobId] = useState(null);
+  const [deadlines, setDeadlines] = useState({}); // jobId -> deadline
+  const [assignments, setAssignments] = useState({}); // `${jobId}-${paramId}` -> assistantId
   const [success, setSuccess] = useState('');
   const [dispatchLoading, setDispatchLoading] = useState(true);
+  const [submittingJobId, setSubmittingJobId] = useState(null);
 
   useEffect(() => {
     const dept = user?.department ? user.department.toLowerCase() : '';
@@ -344,55 +338,59 @@ function Dispatcher() {
     ).catch(console.error).finally(() => setDispatchLoading(false));
   }, [user]);
 
-  const selectedJob = jobs.find(j => j._id === formData.jobId);
-  const deptParams = selectedJob?.parameters?.filter(p => {
-    const d = user?.department ? user.department.toLowerCase() : '';
-    const pt = p.type ? p.type.toLowerCase() : '';
-    if ((d === 'macro' || d === 'chemical') && pt === 'chemical') return true;
-    if (d === 'micro' && pt === 'micro') return true;
-    return false;
-  }) || [];
-
-  const handleAssign = (paramId, assistantId) => {
-    setAssignments({ ...assignments, [paramId]: assistantId });
+  const getDeptParams = (job) => {
+    return job?.parameters?.filter(p => {
+      const d = user?.department ? user.department.toLowerCase() : '';
+      const pt = p.type ? p.type.toLowerCase() : '';
+      if ((d === 'macro' || d === 'chemical') && pt === 'chemical') return true;
+      if (d === 'micro' && pt === 'micro') return true;
+      return false;
+    }) || [];
   };
 
-  const handleAssignAll = (e) => {
-    const assistantId = e.target.value;
+  const handleAssign = (jobId, paramId, assistantId) => {
+    setAssignments(prev => ({ ...prev, [`${jobId}-${paramId}`]: assistantId }));
+  };
+
+  const handleAssignAll = (jobId, assistantId, deptParams) => {
     if (!assistantId) return;
     const newAssignments = { ...assignments };
     deptParams.forEach(p => {
-      newAssignments[p.parameterId._id] = assistantId;
+      newAssignments[`${jobId}-${p.parameterId._id}`] = assistantId;
     });
     setAssignments(newAssignments);
-    e.target.value = "";
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (Object.keys(assignments).length !== deptParams.length) {
-      return alert('Please assign all parameters to analysts');
-    }
+  const handleSubmit = async (job) => {
+    const deptParams = getDeptParams(job);
+    const deadline = deadlines[job._id];
+
+    // Validate all params assigned
+    const allAssigned = deptParams.every(p => assignments[`${job._id}-${p.parameterId._id}`]);
+    if (!allAssigned) return alert('Please assign all parameters to analysts');
+    if (!deadline) return alert('Please set a submission deadline');
+
+    setSubmittingJobId(job._id);
     try {
       const assignmentList = deptParams.map(p => ({
         parameterId: p.parameterId._id,
         name: p.name,
         type: p.type,
         unit: p.unit,
-        assignedTo: assignments[p.parameterId._id]
+        assignedTo: assignments[`${job._id}-${p.parameterId._id}`]
       }));
 
       await axios.post('http://localhost:5000/api/tests/instances', {
-        jobId: formData.jobId,
-        deadline: formData.deadline,
+        jobId: job._id,
+        deadline,
         assignments: assignmentList
       });
       
-      setSuccess('Job parameters dispatched successfully!');
-      setFormData({ jobId: '', deadline: '' });
-      setAssignments({});
+      setSuccess(`Job ${job.jobCode} dispatched successfully!`);
+      setExpandedJobId(null);
       setTimeout(() => setSuccess(''), 4000);
 
+      // Refresh jobs list
       invalidateCache(CACHE_KEYS.JOBS);
       const dept = user?.department ? user.department.toLowerCase() : '';
       const res = await axios.get('http://localhost:5000/api/jobs');
@@ -400,71 +398,153 @@ function Dispatcher() {
     } catch (err) {
       console.error(err);
       alert('Error: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setSubmittingJobId(null);
     }
+  };
+
+  const toggleExpand = (jobId) => {
+    setExpandedJobId(prev => prev === jobId ? null : jobId);
   };
 
   return (
     <div>
       <h1 style={{ marginBottom: '1.5rem' }}>Job Dispatcher</h1>
-      {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>{success}</div>}
+      {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)', fontWeight: 500 }}>{success}</div>}
 
-      <div className="card glass-panel" style={{ maxWidth: '850px' }}>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Select Pending Sample Job</label>
-            <select value={formData.jobId} onChange={e => { setFormData({ ...formData, jobId: e.target.value }); setAssignments({}); }} required>
-              <option value="" disabled>--- Select a Job ---</option>
-              {jobs.map(j => (
-                <option key={j._id} value={j._id}>
-                  {j.jobCode} - {j.clientName}
-                </option>
-              ))}
-            </select>
-          </div>
+      {dispatchLoading ? (
+        <Spinner message="Loading pending jobs..." />
+      ) : jobs.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+          <CheckCircle size={40} style={{ marginBottom: '1rem', opacity: 0.4 }} />
+          <p style={{ fontSize: '1.1rem', fontWeight: 500 }}>No pending jobs to dispatch</p>
+          <p style={{ fontSize: '0.85rem' }}>All jobs have been assigned. Check back later.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {jobs.map(job => {
+            const deptParams = getDeptParams(job);
+            const isExpanded = expandedJobId === job._id;
+            const microCount = deptParams.filter(p => p.type?.toLowerCase() === 'micro').length;
+            const chemCount = deptParams.filter(p => p.type?.toLowerCase() === 'chemical').length;
 
-          {selectedJob && deptParams.length > 0 && (
-            <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h4 style={{ margin: 0 }}>Assign Analysts to Parameters ({deptParams.length})</h4>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Bulk assign all to:</label>
-                  <select onChange={handleAssignAll} defaultValue="" style={{ minWidth: '150px' }}>
-                    <option value="" disabled>Select analyst...</option>
-                    {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {deptParams.map(p => (
-                  <div key={p.parameterId._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--color-surface-hover)', padding: '0.6rem 1rem', borderRadius: 'var(--radius-sm)', gap: '1rem' }}>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontWeight: 600 }}>{p.name}</span> <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>({p.unit})</span>
+            return (
+              <div key={job._id} className="card" style={{ padding: 0, overflow: 'hidden', border: isExpanded ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', transition: 'border-color 0.2s' }}>
+                {/* Card Header — always visible */}
+                <div
+                  onClick={() => toggleExpand(job._id)}
+                  style={{
+                    padding: '1.25rem 1.5rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    backgroundColor: isExpanded ? 'var(--color-surface-hover)' : 'var(--color-surface)',
+                    transition: 'background-color 0.2s'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{ padding: '0.5rem', backgroundColor: 'var(--color-primary)15', borderRadius: 'var(--radius-md)' }}>
+                      <ClipboardCheck size={22} color="var(--color-primary)" />
                     </div>
-                    <select
-                      value={assignments[p.parameterId._id] || ''}
-                      onChange={e => handleAssign(p.parameterId._id, e.target.value)}
-                      required
-                      style={{ minWidth: '180px' }}
-                    >
-                      <option value="" disabled>Select Analyst...</option>
-                      {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
-                    </select>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', fontFamily: 'var(--font-mono)' }}>{job.jobCode}</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>{job.clientName}</div>
+                    </div>
                   </div>
-                ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                        {new Date(job.createdAt).toLocaleDateString()}
+                      </div>
+                      <div style={{ fontSize: '0.8rem', marginTop: '0.15rem' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{deptParams.length}</span>
+                        <span style={{ color: 'var(--color-text-muted)' }}> parameter{deptParams.length !== 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+                    {isExpanded ? <ChevronDown size={20} color="var(--color-primary)" /> : <ChevronRight size={20} color="var(--color-text-muted)" />}
+                  </div>
+                </div>
+
+                {/* Expanded Dispatch Form */}
+                {isExpanded && (
+                  <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+                    {deptParams.length === 0 ? (
+                      <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: '1rem' }}>No parameters for your department in this job.</p>
+                    ) : (
+                      <>
+                        {/* Bulk assign */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                          <h4 style={{ margin: 0, fontSize: '0.95rem' }}>Assign Analysts to Parameters ({deptParams.length})</h4>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <label style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Bulk assign all to:</label>
+                            <select
+                              onChange={e => { handleAssignAll(job._id, e.target.value, deptParams); e.target.value = ''; }}
+                              defaultValue=""
+                              style={{ minWidth: '150px' }}
+                            >
+                              <option value="" disabled>Select analyst...</option>
+                              {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Parameter rows */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                          {deptParams.map(p => (
+                            <div key={p.parameterId._id} style={{
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              backgroundColor: 'var(--color-surface-hover)', padding: '0.6rem 1rem',
+                              borderRadius: 'var(--radius-md)', gap: '1rem'
+                            }}>
+                              <div style={{ flex: 1 }}>
+                                <span style={{ fontWeight: 600 }}>{p.name}</span>{' '}
+                                <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>({p.unit})</span>
+                              </div>
+                              <select
+                                value={assignments[`${job._id}-${p.parameterId._id}`] || ''}
+                                onChange={e => handleAssign(job._id, p.parameterId._id, e.target.value)}
+                                required
+                                style={{ minWidth: '180px' }}
+                              >
+                                <option value="" disabled>Select Analyst...</option>
+                                {assistants.map(ast => <option key={ast._id} value={ast._id}>{ast.name}</option>)}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Deadline + Submit */}
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                          <div style={{ flex: '1 1 250px' }}>
+                            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Submission Deadline</label>
+                            <input
+                              type="datetime-local"
+                              value={deadlines[job._id] || ''}
+                              onChange={e => setDeadlines(prev => ({ ...prev, [job._id]: e.target.value }))}
+                              required
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleSubmit(job)}
+                            className="btn btn-primary"
+                            disabled={submittingJobId === job._id}
+                            style={{ flex: '0 0 auto', padding: '0.6rem 1.5rem', justifyContent: 'center' }}
+                          >
+                            {submittingJobId === job._id ? 'Dispatching...' : 'Dispatch Job'}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
-
-          <div>
-            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Submission Deadline</label>
-            <input type="datetime-local" value={formData.deadline} onChange={e => setFormData({ ...formData, deadline: e.target.value })} required />
-          </div>
-
-          <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }} disabled={!formData.jobId || deptParams.length === 0}>
-            Submit & Dispatch Parameters
-          </button>
-        </form>
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -715,12 +795,27 @@ function Audit() {
         <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <FileText size={28} style={{ color: 'var(--color-primary)' }} /> Department Job Logs
         </h1>
+        <div style={{ 
+          backgroundColor: 'var(--color-surface-hover)', 
+          borderLeft: '4px solid var(--color-primary)', 
+          padding: '1rem 1.5rem', 
+          borderRadius: 'var(--radius-md)',
+          marginBottom: '2rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem'
+        }}>
+          <Clock size={20} style={{ color: 'var(--color-primary)' }} />
+          <div style={{ fontSize: '0.95rem', color: 'var(--color-text-main)', fontWeight: 500 }}>
+            Click on any job row below to view its full lifecycle history, retest cycles, and download final reports.
+          </div>
+        </div>
         <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
       </div>
 
       <div>
         <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          PDF Reports & Completed Audit
+          Completed Activity
         </h2>
         <div className="card glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
           <table>

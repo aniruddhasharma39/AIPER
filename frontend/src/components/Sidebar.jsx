@@ -13,7 +13,7 @@ export default function Sidebar() {
         return [
           { to: '/admin', icon: <LayoutDashboard size={20} />, label: 'Super Admin Tracker' },
           { to: '/admin/users', icon: <Users size={20} />, label: 'Staff Directory' },
-          { to: '/admin/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
+          { to: '/admin/audit', icon: <FileText size={20} />, label: 'Activity Logs' },
         ];
       case 'LAB_HEAD':
         return [
@@ -21,7 +21,7 @@ export default function Sidebar() {
           { to: '/lab-head/review', icon: <ClipboardCheck size={20} />, label: 'Review Queue' },
           { to: '/lab-head/jobs', icon: <Activity size={20} />, label: 'Job Distributor' },
           { to: '/lab-head/users', icon: <Users size={20} />, label: 'User Management' },
-          { to: '/lab-head/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
+          { to: '/lab-head/audit', icon: <FileText size={20} />, label: 'Activity Logs' },
         ];
       case 'HEAD':
         return [
@@ -29,7 +29,7 @@ export default function Sidebar() {
           { to: '/head/review', icon: <ClipboardCheck size={20} />, label: 'Review Queue' },
           { to: '/head/assistants', icon: <Users size={20} />, label: 'Assistants' },
           { to: '/head/dispatcher', icon: <Activity size={20} />, label: 'Job Dispatcher' },
-          { to: '/head/audit', icon: <FileText size={20} />, label: 'Audit Logs' },
+          { to: '/head/audit', icon: <FileText size={20} />, label: 'Activity Logs' },
         ];
       case 'ASSISTANT':
         return [

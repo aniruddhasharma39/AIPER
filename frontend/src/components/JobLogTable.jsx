@@ -15,8 +15,9 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
     
     if (statuses.length === 0) return 'PENDING';
     if (statuses.every(s => s === 'COMPLETED')) return 'COMPLETED';
-    if (statuses.some(s => s === 'ASSIGNED_TO_ASSISTANT')) return 'IN_PROGRESS';
-    return 'PENDING';
+    if (statuses.every(s => s === 'PENDING')) return 'PENDING';
+    // Any mix (e.g. one COMPLETED + one PENDING, or any ASSIGNED_TO_ASSISTANT) = in progress
+    return 'IN_PROGRESS';
   };
 
   // Group jobs: only show ROOT jobs in the main table. Child jobs will be fetched/passed inside JobTimeline.
@@ -75,10 +76,6 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
         </div>
       </div>
 
-      <div style={{ padding: '0.75rem 1.5rem', backgroundColor: '#fefce8', borderBottom: '1px solid #fef08a', fontSize: '0.85rem', color: '#854d0e', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Clock size={14} /> <strong>Tip:</strong> Click on any job row to view its full lifecycle telemetry and download the test reports.
-      </div>
-      
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
           <tr>
@@ -87,7 +84,7 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
             <th>Client Name</th>
             <th>Date Created</th>
             <th>Overall Status</th>
-            <th style={{ textAlign: 'right' }}>Actions</th>
+            {onDeleteJob && <th style={{ textAlign: 'right' }}>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -104,8 +101,8 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
                   <td style={{ fontWeight: 500 }}>{job.clientName}</td>
                   <td>{new Date(job.createdAt).toLocaleDateString()}</td>
                   <td><StatusBadge status={getJobStatus(job)} /></td>
-                  <td style={{ textAlign: 'right', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
-                    {onDeleteJob && (
+                  {onDeleteJob && (
+                    <td style={{ textAlign: 'right', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
                       <button 
                         onClick={(e) => { e.stopPropagation(); onDeleteJob(job._id); }} 
                         style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
@@ -113,8 +110,8 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
                       >
                         <Trash2 size={16} />
                       </button>
-                    )}
-                  </td>
+                    </td>
+                  )}
                 </tr>
                 {expandedJobId === job._id && (
                   <tr>
