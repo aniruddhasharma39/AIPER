@@ -1,7 +1,7 @@
 import React, { useContext } from 'react';
 import { NavLink } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import { Activity, Users, FileText, LayoutDashboard, Settings, ClipboardCheck } from 'lucide-react';
+import { Activity, Users, FileText, LayoutDashboard, Settings, ClipboardCheck, Bug } from 'lucide-react';
 import logo from '../assets/Acropolis20Logo.png';
 
 export default function Sidebar() {
@@ -75,6 +75,30 @@ export default function Sidebar() {
             <span style={{ fontWeight: 500 }}>{link.label}</span>
           </NavLink>
         ))}
+
+        {/* Spacer to push bug report to bottom */}
+        <div style={{ flex: 1 }} />
+
+        <NavLink
+          to="/report-bug"
+          style={({ isActive }) => ({
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            padding: '0.75rem 1rem',
+            borderRadius: 'var(--radius-md)',
+            color: isActive ? 'white' : 'var(--color-text-muted)',
+            backgroundColor: isActive ? 'var(--color-danger)' : 'transparent',
+            textDecoration: 'none',
+            transition: 'all 0.2s',
+            borderTop: '1px solid var(--color-primary-light)',
+            marginTop: '0.5rem',
+            paddingTop: '1rem'
+          })}
+        >
+          <Bug size={20} />
+          <span style={{ fontWeight: 500 }}>Report Bugs</span>
+        </NavLink>
       </nav>
 
       <div style={{ padding: '1.5rem', borderTop: '1px solid var(--color-primary-light)' }}>

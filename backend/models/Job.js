@@ -33,6 +33,7 @@ const jobSchema = new mongoose.Schema({
     sample_name:           { type: String, required: true },
     sample_id:             { type: String, required: true },
     sample_quantity:       { type: String, required: true }, // e.g. "500 ml", "2 kg"
+    sample_count:          { type: Number, required: true, min: 1, default: 1 },
     sample_description:    { type: String, required: true },
     condition_on_receipt:  { type: String, required: true },
     packing_details:       { type: String },
@@ -56,22 +57,29 @@ const jobSchema = new mongoose.Schema({
   distribution: {
     micro: {
       required: { type: Boolean, default: false },
-      status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
+      assignedHead: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      status: { type: String, enum: ['PENDING', 'AWAITING_TRANSFER', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
       reopenInfo: {
         parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance' },
         parentVersion: { type: Number },
         note: { type: String }
       }
     },
-    macro: {
+    chemical: {
       required: { type: Boolean, default: false },
-      status: { type: String, enum: ['PENDING', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
+      assignedHead: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      status: { type: String, enum: ['PENDING', 'AWAITING_TRANSFER', 'ASSIGNED_TO_ASSISTANT', 'COMPLETED'], default: 'PENDING' },
       reopenInfo: {
         parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance' },
         parentVersion: { type: Number },
         note: { type: String }
       }
     }
+  },
+  sampleFlow: {
+    type: { type: String, enum: ['PARALLEL', 'SEQUENTIAL'], default: 'PARALLEL' },
+    firstDepartment: { type: String, enum: ['micro', 'chemical'], default: 'micro' },
+    transferDeadline: { type: Date }
   },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   

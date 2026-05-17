@@ -3,6 +3,7 @@ import { Bell, Check, Info, AlertTriangle, CheckCircle, Clock, Circle, X } from 
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState([]);
@@ -28,8 +29,8 @@ export default function NotificationBell() {
   useEffect(() => {
     fetchNotifications();
 
-    // Polling every 30 seconds
-    const interval = setInterval(fetchNotifications, 30000);
+    // Polling every 60 seconds as a fallback
+    const interval = setInterval(fetchNotifications, 60000);
 
     // Fetch on window focus
     const onFocus = () => fetchNotifications();
@@ -40,6 +41,25 @@ export default function NotificationBell() {
       window.removeEventListener('focus', onFocus);
     };
   }, []);
+
+  const socket = useSocket();
+
+  useEffect(() => {
+    if (!socket || !user) return;
+    
+    const handleNewNotification = (payload) => {
+      // If the notification was meant for this user, fetch the latest
+      if (payload.recipientId === user._id) {
+        fetchNotifications();
+      }
+    };
+
+    socket.on('NEW_NOTIFICATION', handleNewNotification);
+
+    return () => {
+      socket.off('NEW_NOTIFICATION', handleNewNotification);
+    };
+  }, [socket, user]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -239,6 +259,25 @@ export default function NotificationBell() {
                 </div>
               ))
             )}
+          </div>
+
+          {/* Footer link to full page */}
+          <div style={{
+            padding: '0.75rem 1rem',
+            borderTop: '1px solid var(--color-border)',
+            textAlign: 'center',
+            backgroundColor: 'var(--color-surface-hover)'
+          }}>
+            <button
+              onClick={() => { navigate('/notifications'); setIsOpen(false); }}
+              style={{
+                background: 'none', border: 'none',
+                color: 'var(--color-primary)', cursor: 'pointer',
+                fontSize: '0.85rem', fontWeight: 600
+              }}
+            >
+              View All Notifications
+            </button>
           </div>
         </div>
       )}

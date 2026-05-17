@@ -1,20 +1,22 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
+import { Trash2, Edit, Plus, Check, FileText, Activity, Users, Settings, Clock, CheckCircle, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, ArrowRightLeft, Send, PackageCheck } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
 import JobLogTable from '../components/JobLogTable';
 import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
 import Spinner from '../components/Spinner';
+import { useSocket } from '../context/SocketContext';
 
 function Dashboard() {
   const { user } = useContext(AuthContext);
   const [stats, setStats] = useState({
     ongoingJobs: 0,
     completedJobs: 0,
-    activeAnalysts: 0
+    activeAnalysts: 0,
+    pendingTransfers: 0
   });
   const [recentActivity, setRecentActivity] = useState([]);
   const [statsLoading, setStatsLoading] = useState(
@@ -24,37 +26,57 @@ function Dashboard() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const [jobsRes, instancesRes, usersRes] = await Promise.all([
+        // Use cache for initial render
+        const cachedJobs = sessionStorage.getItem(CACHE_KEYS.JOBS);
+        const cachedInstances = sessionStorage.getItem(CACHE_KEYS.INSTANCES);
+        // Note: sample-transfers aren't globally cached yet, so we'll just skip them in the 0ms render or use 0
+
+        const computeStats = (jobs, instances, pendingIn, pendingOut) => {
+          const ongoingJobs = jobs.filter(j => {
+            const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+            const chemicalDone = !j.distribution?.chemical?.required || j.distribution.chemical.status === 'COMPLETED';
+            return !(microDone && chemicalDone);
+          }).length;
+          const completedJobs = jobs.filter(j => {
+            const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+            const chemicalDone = !j.distribution?.chemical?.required || j.distribution.chemical.status === 'COMPLETED';
+            return microDone && chemicalDone;
+          }).length;
+          const activeAnalysts = new Set(
+            instances.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
+          ).size;
+
+          const pendingTransfers = pendingIn + pendingOut;
+
+          setStats({ ongoingJobs, completedJobs, activeAnalysts, pendingTransfers });
+
+          // Get latest 5 activities in this department
+          const sortedInstances = [...instances]
+            .filter(i => i.createdBy?.department === user.department || i.assignedTo?.department === user.department)
+            .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+            .slice(0, 5);
+          
+          setRecentActivity(sortedInstances);
+        };
+
+        if (cachedJobs && cachedInstances) {
+          computeStats(JSON.parse(cachedJobs), JSON.parse(cachedInstances), 0, 0);
+        }
+
+        const [jobsRes, instancesRes, usersRes, inTransfersRes, outTransfersRes] = await Promise.all([
           axios.get('http://localhost:5000/api/jobs'),
           axios.get('http://localhost:5000/api/tests/instances'),
-          axios.get('http://localhost:5000/api/users')
+          axios.get('http://localhost:5000/api/users'),
+          axios.get('http://localhost:5000/api/sample-transfers/incoming', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+          axios.get('http://localhost:5000/api/sample-transfers/outgoing', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
         ]);
 
-        const dept = user?.department?.toLowerCase() || '';
-
-        const ongoingJobs = jobsRes.data.filter(j => {
-          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
-          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
-          return !(microDone && macroDone);
-        }).length;
-        const completedJobs = jobsRes.data.filter(j => {
-          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
-          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
-          return microDone && macroDone;
-        }).length;
-        const activeAnalysts = new Set(
-          instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
-        ).size;
-
-        setStats({ ongoingJobs, completedJobs, activeAnalysts });
-
-        // Get latest 5 activities in this department
-        const sortedInstances = instancesRes.data
-          .filter(i => i.createdBy?.department === user.department || i.assignedTo?.department === user.department)
-          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-          .slice(0, 5);
+        computeStats(jobsRes.data, instancesRes.data, inTransfersRes.data.length, outTransfersRes.data.length);
         
-        setRecentActivity(sortedInstances);
+        sessionStorage.setItem(CACHE_KEYS.JOBS, JSON.stringify(jobsRes.data));
+        sessionStorage.setItem(CACHE_KEYS.INSTANCES, JSON.stringify(instancesRes.data));
+        sessionStorage.setItem(CACHE_KEYS.USERS, JSON.stringify(usersRes.data));
+
       } catch (err) {
         console.error('Error fetching dashboard stats:', err);
       } finally {
@@ -106,6 +128,13 @@ function Dashboard() {
           value={stats.activeAnalysts} 
           color="#8B5CF6" 
           subtitle="Currently working on jobs" 
+        />
+        <StatCard 
+          icon={ArrowRightLeft} 
+          title="Pending Transfers" 
+          value={stats.pendingTransfers} 
+          color="#F59E0B" 
+          subtitle="Awaiting hand-over or receipt" 
         />
       </div>
 
@@ -320,29 +349,83 @@ function Dispatcher() {
   const { user } = useContext(AuthContext);
 
   const [expandedJobId, setExpandedJobId] = useState(null);
-  const [deadlines, setDeadlines] = useState({}); // jobId -> deadline
+  const [deadlineDates, setDeadlineDates] = useState({}); // jobId -> date string
+  const [deadlineTimes, setDeadlineTimes] = useState({}); // jobId -> time string
   const [assignments, setAssignments] = useState({}); // `${jobId}-${paramId}` -> assistantId
   const [success, setSuccess] = useState('');
-  const [dispatchLoading, setDispatchLoading] = useState(true);
+  const [dispatchLoading, setDispatchLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.JOBS)
+  );
   const [submittingJobId, setSubmittingJobId] = useState(null);
+
+  // Sample transfer state
+  const [incomingTransfers, setIncomingTransfers] = useState([]);
+  const [outgoingJobs, setOutgoingJobs] = useState([]);
+  const [transferListLoading, setTransferListLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.TRANSFERS_IN) || !sessionStorage.getItem(CACHE_KEYS.TRANSFERS_OUT)
+  );
+  const [transferLoading, setTransferLoading] = useState(false);
+  const [transferConfirmData, setTransferConfirmData] = useState(null); // { type: 'send' | 'receive', id: string, title, message }
+
+  const fetchJobs = () => {
+    const dept = user?.department ? user.department.toLowerCase() : '';
+    fetchWithCache('http://localhost:5000/api/jobs', CACHE_KEYS.JOBS,
+      (data) => setJobs(data.filter(j => {
+        const dKey = dept === 'chemical' ? 'chemical' : dept;
+        const dist = j.distribution[dKey];
+        const headId = dist?.assignedHead?._id || dist?.assignedHead;
+        return dist?.status === 'PENDING' && (!headId || headId === user._id);
+      }))
+    ).catch(console.error).finally(() => setDispatchLoading(false));
+  };
 
   useEffect(() => {
     const dept = user?.department ? user.department.toLowerCase() : '';
-    
     fetchWithCache('http://localhost:5000/api/users', CACHE_KEYS.USERS, 
       (data) => setAssistants(data.filter(u => u.role === 'ASSISTANT' && u.department === user.department))
     ).catch(console.error);
 
-    fetchWithCache('http://localhost:5000/api/jobs', CACHE_KEYS.JOBS,
-      (data) => setJobs(data.filter(j => j.distribution[dept === 'chemical' ? 'macro' : dept]?.status === 'PENDING'))
-    ).catch(console.error).finally(() => setDispatchLoading(false));
+    fetchJobs();
+    fetchTransfers();
   }, [user]);
+
+  const socket = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const updateJobs = () => { invalidateCache(CACHE_KEYS.JOBS); fetchJobs(); };
+    const updateTransfers = () => { fetchTransfers(); };
+
+    socket.on('JOB_CREATED', updateJobs);
+    socket.on('JOB_RETEST_INITIATED', updateJobs);
+    socket.on('TRANSFER_INITIATED', updateTransfers);
+    socket.on('TRANSFER_RECEIVED', () => { updateJobs(); updateTransfers(); });
+
+    return () => {
+      socket.off('JOB_CREATED', updateJobs);
+      socket.off('JOB_RETEST_INITIATED', updateJobs);
+      socket.off('TRANSFER_INITIATED', updateTransfers);
+      socket.off('TRANSFER_RECEIVED');
+    };
+  }, [socket, user]);
+
+  const fetchTransfers = async () => {
+    try {
+      const p1 = fetchWithCache('http://localhost:5000/api/sample-transfers/incoming', CACHE_KEYS.TRANSFERS_IN, setIncomingTransfers, { Authorization: `Bearer ${localStorage.getItem('token')}` });
+      const p2 = fetchWithCache('http://localhost:5000/api/sample-transfers/outgoing', CACHE_KEYS.TRANSFERS_OUT, setOutgoingJobs, { Authorization: `Bearer ${localStorage.getItem('token')}` });
+      await Promise.all([p1, p2]);
+    } catch (err) {
+      console.error('Error fetching transfers:', err);
+    } finally {
+      setTransferListLoading(false);
+    }
+  };
 
   const getDeptParams = (job) => {
     return job?.parameters?.filter(p => {
       const d = user?.department ? user.department.toLowerCase() : '';
       const pt = p.type ? p.type.toLowerCase() : '';
-      if ((d === 'macro' || d === 'chemical') && pt === 'chemical') return true;
+      if ((d === 'chemical' || d === 'chemical') && pt === 'chemical') return true;
       if (d === 'micro' && pt === 'micro') return true;
       return false;
     }) || [];
@@ -363,7 +446,9 @@ function Dispatcher() {
 
   const handleSubmit = async (job) => {
     const deptParams = getDeptParams(job);
-    const deadline = deadlines[job._id];
+    const dDate = deadlineDates[job._id];
+    const dTime = deadlineTimes[job._id];
+    const deadline = (dDate && dTime) ? `${dDate}T${dTime}` : null;
 
     // Validate all params assigned
     const allAssigned = deptParams.every(p => assignments[`${job._id}-${p.parameterId._id}`]);
@@ -394,7 +479,12 @@ function Dispatcher() {
       invalidateCache(CACHE_KEYS.JOBS);
       const dept = user?.department ? user.department.toLowerCase() : '';
       const res = await axios.get('http://localhost:5000/api/jobs');
-      setJobs(res.data.filter(j => j.distribution[dept === 'chemical' ? 'macro' : dept]?.status === 'PENDING'));
+      setJobs(res.data.filter(j => {
+        const dKey = dept === 'chemical' ? 'chemical' : dept;
+        const dist = j.distribution[dKey];
+        const headId = dist?.assignedHead?._id || dist?.assignedHead;
+        return dist?.status === 'PENDING' && (!headId || headId === user._id);
+      }));
     } catch (err) {
       console.error(err);
       alert('Error: ' + (err.response?.data?.message || err.message));
@@ -407,10 +497,149 @@ function Dispatcher() {
     setExpandedJobId(prev => prev === jobId ? null : jobId);
   };
 
+  const handleSendTransferClick = (jobId) => {
+    setTransferConfirmData({
+      type: 'send',
+      id: jobId,
+      title: 'Hand Over Sample',
+      message: 'You are handing over this sample to the other department. This action will be recorded and cannot be undone.'
+    });
+  };
+
+  const handleReceiveTransferClick = (transferId) => {
+    setTransferConfirmData({
+      type: 'receive',
+      id: transferId,
+      title: 'Confirm Receipt',
+      message: 'You are confirming receipt of this sample. The job will become available in your dispatcher.'
+    });
+  };
+
+  const executeTransfer = async () => {
+    if (!transferConfirmData) return;
+    const { type, id } = transferConfirmData;
+    setTransferConfirmData(null);
+    setTransferLoading(true);
+    
+    try {
+      if (type === 'send') {
+        await axios.post('http://localhost:5000/api/sample-transfers', { jobId: id }, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+        setSuccess('Sample hand-over recorded! The other department has been notified.');
+        setOutgoingJobs(prev => prev.filter(j => j._id !== id));
+      } else if (type === 'receive') {
+        await axios.put(`http://localhost:5000/api/sample-transfers/${id}/receive`, {}, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+        setSuccess('Sample receipt confirmed! The job is now available in your dispatcher.');
+        invalidateCache(CACHE_KEYS.JOBS);
+      }
+      setTimeout(() => setSuccess(''), 4000);
+      fetchTransfers();
+    } catch (err) {
+      alert(err.response?.data?.message || `Error ${type === 'send' ? 'sending' : 'receiving'} transfer`);
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
   return (
     <div>
       <h1 style={{ marginBottom: '1.5rem' }}>Job Dispatcher</h1>
       {success && <div style={{ marginBottom: '1rem', color: 'var(--color-success)', backgroundColor: 'var(--color-success-light)', padding: '1rem', borderRadius: 'var(--radius-md)', fontWeight: 500 }}>{success}</div>}
+
+      {/* ── Incoming Transfers ── */}
+      {transferListLoading && incomingTransfers.length === 0 && outgoingJobs.length === 0 ? (
+        <Spinner message="Loading transfers..." />
+      ) : incomingTransfers.length > 0 && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-warning)' }}>
+            <PackageCheck size={20} /> Incoming Samples — Action Required
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {incomingTransfers.map(transfer => (
+              <div key={transfer._id} className="card" style={{
+                padding: '1.25rem 1.5rem',
+                border: '2px solid var(--color-warning)',
+                backgroundColor: 'rgba(241, 196, 15, 0.05)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem'
+              }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.3rem' }}>
+                    📦 Sample from {transfer.fromDepartment === 'micro' ? 'Micro' : 'Chemical'} Department
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                    Job: <strong>{transfer.jobId?.jobCode || 'N/A'}</strong>
+                    {transfer.jobId?.clientName && ` — ${transfer.jobId.clientName}`}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
+                    Sent by: {transfer.sentBy?.name || 'Unknown'} · {new Date(transfer.sentAt).toLocaleString()}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleReceiveTransferClick(transfer._id)}
+                  disabled={transferLoading}
+                  className="btn btn-primary"
+                  style={{ padding: '0.6rem 1.2rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  <Check size={16} /> {transferLoading ? 'Processing...' : 'Confirm Receipt'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Outgoing Transfers (Hand Over) ── */}
+      {outgoingJobs.length > 0 && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-primary)' }}>
+            <Send size={20} /> Samples Ready for Hand-Over
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {outgoingJobs.map(job => {
+              const secondDept = job.sampleFlow?.firstDepartment === 'micro' ? 'Chemical' : 'Micro';
+              return (
+                <div key={job._id} className="card" style={{
+                  padding: '1.25rem 1.5rem',
+                  border: '2px solid var(--color-primary)',
+                  backgroundColor: 'rgba(52, 152, 219, 0.05)',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem'
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.3rem' }}>
+                      🔄 Hand Over to {secondDept} Department
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                      Job: <strong>{job.jobCode}</strong> — {job.clientName || 'N/A'}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
+                      Your testing is complete. The {secondDept} department is waiting for this sample.
+                      {job.sampleFlow?.transferDeadline && (
+                        <span style={{ color: new Date(job.sampleFlow.transferDeadline) < new Date() ? 'var(--color-danger)' : 'var(--color-warning)', fontWeight: 600 }}>
+                          {' '}· Deadline: {new Date(job.sampleFlow.transferDeadline).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleSendTransferClick(job._id)}
+                    disabled={transferLoading}
+                    className="btn"
+                    style={{
+                      padding: '0.6rem 1.2rem', display: 'flex', alignItems: 'center', gap: '0.4rem',
+                      backgroundColor: 'var(--color-primary)', color: 'white'
+                    }}
+                  >
+                    <ArrowRightLeft size={16} /> {transferLoading ? 'Processing...' : 'Hand Over Sample'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {dispatchLoading ? (
         <Spinner message="Loading pending jobs..." />
@@ -516,12 +745,30 @@ function Dispatcher() {
 
                         {/* Deadline + Submit */}
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                          <div style={{ flex: '1 1 250px' }}>
-                            <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Submission Deadline</label>
+                          <div style={{ flex: '1 1 180px' }}>
+                            <label style={{ display: 'block', fontSize: '0.82rem', marginBottom: '0.4rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Deadline Date <span style={{color:'var(--color-danger)'}}>*</span></label>
                             <input
-                              type="datetime-local"
-                              value={deadlines[job._id] || ''}
-                              onChange={e => setDeadlines(prev => ({ ...prev, [job._id]: e.target.value }))}
+                              type="date"
+                              value={deadlineDates[job._id] || ''}
+                              onChange={e => {
+                                setDeadlineDates(prev => ({ ...prev, [job._id]: e.target.value }));
+                                setDeadlineTimes(prev => {
+                                  if (!prev[job._id] && e.target.value) {
+                                    return { ...prev, [job._id]: '17:00' };
+                                  }
+                                  return prev;
+                                });
+                              }}
+                              required
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+                          <div style={{ flex: '1 1 130px' }}>
+                            <label style={{ display: 'block', fontSize: '0.82rem', marginBottom: '0.4rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Due Time <span style={{color:'var(--color-danger)'}}>*</span></label>
+                            <input
+                              type="time"
+                              value={deadlineTimes[job._id] || ''}
+                              onChange={e => setDeadlineTimes(prev => ({ ...prev, [job._id]: e.target.value }))}
                               required
                               style={{ width: '100%' }}
                             />
@@ -545,17 +792,61 @@ function Dispatcher() {
           })}
         </div>
       )}
+
+      {/* ── CUSTOM CONFIRMATION MODAL ── */}
+      {transferConfirmData && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, backdropFilter: 'blur(4px)'
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem', animation: 'slideUp 0.3s ease', borderTop: '4px solid var(--color-primary)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', color: 'var(--color-primary)' }}>
+              {transferConfirmData.type === 'send' ? <Send size={32} /> : <PackageCheck size={32} />}
+              <h2 style={{ margin: 0, fontSize: '1.25rem' }}>{transferConfirmData.title}</h2>
+            </div>
+            
+            <p style={{ margin: '0 0 1.5rem 0', color: 'var(--color-text-main)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {transferConfirmData.message}
+            </p>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn" 
+                onClick={() => setTransferConfirmData(null)}
+                style={{ border: '1px solid var(--color-primary)', color: 'var(--color-primary)', padding: '0.6rem 2rem', backgroundColor: 'transparent' }}
+                disabled={transferLoading}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={executeTransfer}
+                style={{ padding: '0.6rem 2rem' }}
+                disabled={transferLoading}
+              >
+                {transferLoading ? 'Processing...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function ReviewQueue() {
+  const { user } = useContext(AuthContext);
   const [instances, setInstances] = useState([]);
   const [selectedInstance, setSelectedInstance] = useState(null);
   const [reassignNote, setReassignNote] = useState('');
-  const [showReassignForm, setShowReassignForm] = useState(null);
+  const [showReassignForm, setShowReassignForm] = useState(null); // instance._id when reassign mode is active
   const [success, setSuccess] = useState('');
   const [reviewLoading, setReviewLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.INSTANCES));
+  const [assistants, setAssistants] = useState([]);
+
+  // Selective reassignment state: { [parameterId]: { selected: bool, assignedTo: userId } }
+  const [paramSelections, setParamSelections] = useState({});
 
   const fetchReviewItems = async () => {
     try {
@@ -571,7 +862,28 @@ function ReviewQueue() {
     }
   };
 
-  useEffect(() => { fetchReviewItems(); }, []);
+  useEffect(() => {
+    fetchReviewItems();
+    // Fetch assistants in this department for the analyst dropdown
+    fetchWithCache('http://localhost:5000/api/users', CACHE_KEYS.USERS,
+      (data) => setAssistants(data.filter(u => u.role === 'ASSISTANT' && u.department === user.department))
+    ).catch(console.error);
+  }, []);
+
+  const socket = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const refresh = () => { invalidateCache(CACHE_KEYS.INSTANCES); fetchReviewItems(); };
+
+    socket.on('TEST_SUBMITTED', refresh);
+    socket.on('TEST_REVIEWED', refresh);
+
+    return () => {
+      socket.off('TEST_SUBMITTED', refresh);
+      socket.off('TEST_REVIEWED', refresh);
+    };
+  }, [socket]);
 
   const handleApprove = async (id) => {
     try {
@@ -586,15 +898,63 @@ function ReviewQueue() {
     }
   };
 
+  const enterReassignMode = (inst) => {
+    setShowReassignForm(inst._id);
+    // Initialize all params as unselected, with the original analyst as default
+    const selections = {};
+    inst.results.forEach(r => {
+      selections[r.parameterId] = {
+        selected: false,
+        assignedTo: inst.assignedTo?._id || inst.assignedTo || ''
+      };
+    });
+    setParamSelections(selections);
+    setReassignNote('');
+  };
+
+  const exitReassignMode = () => {
+    setShowReassignForm(null);
+    setParamSelections({});
+    setReassignNote('');
+  };
+
+  const toggleParamSelection = (parameterId) => {
+    setParamSelections(prev => ({
+      ...prev,
+      [parameterId]: {
+        ...prev[parameterId],
+        selected: !prev[parameterId]?.selected
+      }
+    }));
+  };
+
+  const changeParamAnalyst = (parameterId, analystId) => {
+    setParamSelections(prev => ({
+      ...prev,
+      [parameterId]: {
+        ...prev[parameterId],
+        assignedTo: analystId
+      }
+    }));
+  };
+
   const handleReassign = async (id) => {
+    const selected = Object.entries(paramSelections)
+      .filter(([, v]) => v.selected)
+      .map(([parameterId, v]) => ({ parameterId, assignedTo: v.assignedTo }));
+
+    if (selected.length === 0) {
+      return alert('Please select at least one parameter to reassign.');
+    }
+
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${id}/review`, {
         action: 'REASSIGN',
-        note: reassignNote
+        note: reassignNote,
+        selectedParams: selected
       });
-      setSuccess('Sent back to analyst for correction.');
-      setReassignNote('');
-      setShowReassignForm(null);
+      setSuccess(`Sent ${selected.length} parameter(s) for retest.`);
+      exitReassignMode();
       invalidateCache(CACHE_KEYS.INSTANCES);
       fetchReviewItems();
       setSelectedInstance(null);
@@ -603,6 +963,8 @@ function ReviewQueue() {
       console.error(err);
     }
   };
+
+  const selectedCount = Object.values(paramSelections).filter(v => v.selected).length;
 
   return (
     <div>
@@ -633,8 +995,11 @@ function ReviewQueue() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {instances.map(inst => (
-            <div key={inst._id} className="card" style={{ borderLeft: '4px solid var(--color-warning)', padding: 0, overflow: 'hidden' }}>
+          {instances.map(inst => {
+            const isReassignMode = showReassignForm === inst._id;
+
+            return (
+            <div key={inst._id} className="card" style={{ borderLeft: `4px solid ${isReassignMode ? 'var(--color-danger)' : 'var(--color-warning)'}`, padding: 0, overflow: 'hidden', transition: 'border-color 0.2s' }}>
               {/* Header */}
               <div style={{ padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', cursor: 'pointer', backgroundColor: selectedInstance === inst._id ? 'var(--color-surface-hover)' : 'transparent' }}
                 onClick={() => setSelectedInstance(selectedInstance === inst._id ? null : inst._id)}
@@ -670,33 +1035,91 @@ function ReviewQueue() {
                     </div>
                   )}
 
+                  {/* Reassign mode info banner */}
+                  {isReassignMode && (
+                    <div style={{ 
+                      marginBottom: '1rem', padding: '0.75rem 1rem', 
+                      backgroundColor: 'rgba(231, 76, 60, 0.06)', borderRadius: 'var(--radius-md)', 
+                      border: '1px solid var(--color-danger)',
+                      fontSize: '0.85rem', color: 'var(--color-danger)', fontWeight: 500,
+                      display: 'flex', alignItems: 'center', gap: '0.5rem'
+                    }}>
+                      <RotateCcw size={16} />
+                      Select the parameters that need retesting. You can assign each to a different analyst.
+                      {selectedCount > 0 && <span style={{ marginLeft: 'auto', fontWeight: 700 }}>{selectedCount} selected</span>}
+                    </div>
+                  )}
+
                   {/* Results table */}
                   <h4 style={{ marginBottom: '0.75rem' }}>Submitted Results</h4>
                   <table style={{ marginBottom: '1.5rem' }}>
                     <thead style={{ backgroundColor: 'var(--color-surface-hover)' }}>
                       <tr>
+                        {isReassignMode && <th style={{ width: '40px', textAlign: 'center' }}></th>}
                         <th>Parameter</th>
                         <th>Value</th>
                         <th>Unit</th>
                         <th>Test Method</th>
                         <th>Reference Range</th>
+                        {isReassignMode && <th>Assign To</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {inst.results.map(r => (
-                        <tr key={r.parameterId}>
+                      {inst.results.map(r => {
+                        const sel = paramSelections[r.parameterId];
+                        const isSelected = sel?.selected;
+
+                        return (
+                        <tr 
+                          key={r.parameterId} 
+                          onClick={isReassignMode ? () => toggleParamSelection(r.parameterId) : undefined}
+                          style={{ 
+                            cursor: isReassignMode ? 'pointer' : 'default',
+                            backgroundColor: isSelected ? 'rgba(231, 76, 60, 0.06)' : 'transparent',
+                            transition: 'background-color 0.15s'
+                          }}
+                        >
+                          {isReassignMode && (
+                            <td style={{ textAlign: 'center' }}>
+                              <input 
+                                type="checkbox" 
+                                checked={!!isSelected} 
+                                onChange={() => toggleParamSelection(r.parameterId)}
+                                onClick={e => e.stopPropagation()}
+                                style={{ width: '16px', height: '16px', accentColor: 'var(--color-danger)', cursor: 'pointer' }}
+                              />
+                            </td>
+                          )}
                           <td style={{ fontWeight: 500 }}>{r.name}</td>
-                          <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{r.value || '—'}</td>
+                          <td style={{ fontFamily: 'monospace', fontWeight: 600, color: isSelected ? 'var(--color-danger)' : 'var(--color-primary)' }}>{r.value || '—'}</td>
                           <td>{r.unit}</td>
                           <td style={{ fontSize: '0.85rem' }}>{r.testMethod || '—'}</td>
                           <td style={{ color: 'var(--color-text-muted)' }}>{r.referenceRange}</td>
+                          {isReassignMode && (
+                            <td onClick={e => e.stopPropagation()}>
+                              {isSelected ? (
+                                <select
+                                  value={sel?.assignedTo || ''}
+                                  onChange={e => changeParamAnalyst(r.parameterId, e.target.value)}
+                                  style={{ minWidth: '140px', fontSize: '0.85rem' }}
+                                >
+                                  {assistants.map(a => (
+                                    <option key={a._id} value={a._id}>{a.name}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>—</span>
+                              )}
+                            </td>
+                          )}
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
 
                   {/* Actions */}
-                  {showReassignForm === inst._id ? (
+                  {isReassignMode ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       <div>
                         <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.4rem', fontSize: '0.9rem' }}>Reason for Reassignment</label>
@@ -708,10 +1131,19 @@ function ReviewQueue() {
                         />
                       </div>
                       <div style={{ display: 'flex', gap: '1rem' }}>
-                        <button onClick={() => handleReassign(inst._id)} className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white', border: 'none' }}>
-                          <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Confirm Reassignment
+                        <button 
+                          onClick={() => handleReassign(inst._id)} 
+                          className="btn" 
+                          disabled={selectedCount === 0}
+                          style={{ 
+                            backgroundColor: selectedCount > 0 ? 'var(--color-danger)' : 'var(--color-border)', 
+                            color: 'white', border: 'none',
+                            opacity: selectedCount === 0 ? 0.5 : 1
+                          }}
+                        >
+                          <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign {selectedCount} Parameter{selectedCount !== 1 ? 's' : ''}
                         </button>
-                        <button onClick={() => { setShowReassignForm(null); setReassignNote(''); }} className="btn" style={{ border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Cancel</button>
+                        <button onClick={exitReassignMode} className="btn" style={{ border: '1px solid var(--color-border)', backgroundColor: 'transparent' }}>Cancel</button>
                       </div>
                     </div>
                   ) : (
@@ -719,7 +1151,7 @@ function ReviewQueue() {
                       <button onClick={() => handleApprove(inst._id)} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
                         <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Forward to Lab Head
                       </button>
-                      <button onClick={() => setShowReassignForm(inst._id)} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
+                      <button onClick={() => enterReassignMode(inst)} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
                         <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign to Analyst
                       </button>
                     </div>
@@ -727,7 +1159,8 @@ function ReviewQueue() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -761,8 +1194,8 @@ function Audit() {
       const processData = (allInstances, allJobs) => {
         const isJobFullyCompleted = (job) => {
           const microOk = !job.distribution?.micro?.required || job.distribution.micro.status === 'COMPLETED';
-          const macroOk = !job.distribution?.macro?.required || job.distribution.macro.status === 'COMPLETED';
-          return microOk && macroOk;
+          const chemicalOk = !job.distribution?.chemical?.required || job.distribution.chemical.status === 'COMPLETED';
+          return microOk && chemicalOk;
         };
         const fullyCompletedJobIds = new Set(allJobs.filter(j => isJobFullyCompleted(j)).map(j => j._id));
         setInstances(allInstances.filter(i => i.status === 'COMPLETED' && fullyCompletedJobIds.has(i.jobId)));
@@ -810,7 +1243,11 @@ function Audit() {
             Click on any job row below to view its full lifecycle history, retest cycles, and download final reports.
           </div>
         </div>
-        <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
+        {auditLoading && jobs.length === 0 ? (
+          <div className="card"><Spinner message="Loading logs..." /></div>
+        ) : (
+          <JobLogTable jobs={jobs} title="Lifecycle Tracker" />
+        )}
       </div>
 
       <div>

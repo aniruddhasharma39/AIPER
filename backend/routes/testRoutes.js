@@ -5,6 +5,7 @@ const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
 const Notification = require('../models/Notification');
+const User = require('../models/User');
 const { createNotification, notifyLabHeads, notifyAdmins } = require('../utils/notifier');
 
 // --- TEST INSTANCES ---
@@ -60,7 +61,7 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
 
     // Child test code convention:
     //   Micro dept  → {jobCode}-1   e.g. 2605070001-1
-    //   Chemical/Macro dept → {jobCode}-2   e.g. 2605070001-2
+    //   Chemical/Chemical dept → {jobCode}-2   e.g. 2605070001-2
     const deptSuffix = (dept === 'micro') ? '1' : '2';
     const baseTestCode = `${job.jobCode}-${deptSuffix}`;
 
@@ -127,7 +128,7 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
     }
 
     // Update job distribution status
-    const distDept = (dept === 'chemical' || dept === 'macro') ? 'macro' : 'micro';
+    const distDept = (dept === 'chemical') ? 'chemical' : 'micro';
     if (job.distribution && job.distribution[distDept]) {
       job.distribution[distDept].status = 'ASSIGNED_TO_ASSISTANT';
       job.distribution[distDept].reopenInfo = undefined;
@@ -141,6 +142,10 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
       message: `${dept.toUpperCase()} HEAD has dispatched tests for job ${job.jobCode} to analysts.`,
       relatedJobId: jobId
     });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('JOB_DISTRIBUTED');
+    }
 
     res.status(201).json({ message: 'Dispatched successfully', instances: createdInstances });
   } catch (err) {
@@ -207,6 +212,10 @@ router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req
       link: '/head/review'
     });
 
+    if (req.app.get('io')) {
+      req.app.get('io').emit('TEST_SUBMITTED');
+    }
+
     res.json(instance);
   } catch (err) {
     res.status(500).json({ message: 'Error updating results' });
@@ -216,7 +225,8 @@ router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req
 // HEAD reviews an instance: APPROVE (→ PENDING_LAB_HEAD_REVIEW) or REASSIGN (→ PENDING)
 router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res) => {
   try {
-    const { action, note } = req.body;
+    const { action, note, selectedParams } = req.body;
+    // selectedParams: [{ parameterId, assignedTo }] — only for REASSIGN with selective params
     if (!['APPROVE', 'REASSIGN'].includes(action)) {
       return res.status(400).json({ message: 'Invalid action. Must be APPROVE or REASSIGN.' });
     }
@@ -237,19 +247,9 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
 
     if (action === 'APPROVE') {
       instance.status = 'PENDING_LAB_HEAD_REVIEW';
-    } else {
-      // REASSIGN: snapshot current results for reference, clear values, send back to PENDING
-      instance.previousResults = instance.results.map(r => ({ ...r.toObject() }));
-      instance.results = instance.results.map(r => ({
-        ...r.toObject(),
-        value: '' // wipe values — assistant must re-enter
-      }));
-      instance.status = 'PENDING';
-    }
+      instance.retestOnly = []; // clear any previous retest flags
+      await instance.save();
 
-    await instance.save();
-
-    if (action === 'APPROVE') {
       await notifyLabHeads({
         type: 'ACTION_REQUIRED',
         title: 'Final Review Required',
@@ -259,26 +259,172 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
         link: '/lab-head/review'
       });
     } else {
-      await createNotification({
-        recipient: instance.assignedTo,
-        type: 'WARNING',
-        title: 'Job Reassigned',
-        message: `Your results for test ${instance.testCode} were rejected by HEAD. Please revise.`,
-        relatedJobId: instance.jobId,
-        relatedInstanceId: instance._id,
-        link: '/assistant'
-      });
+      // REASSIGN flow
+      instance.previousResults = instance.results.map(r => ({ ...r.toObject() }));
+
+      if (selectedParams && selectedParams.length > 0) {
+        // ── Selective reassignment ──
+        const selectedParamIds = selectedParams.map(sp => sp.parameterId);
+        
+        // Group selected params by target analyst
+        const byAnalyst = {};
+        for (const sp of selectedParams) {
+          const targetId = sp.assignedTo || instance.assignedTo.toString();
+          if (!byAnalyst[targetId]) byAnalyst[targetId] = [];
+          byAnalyst[targetId].push(sp.parameterId);
+        }
+
+        const originalAssigneeId = instance.assignedTo.toString();
+        const uniqueAnalysts = Object.keys(byAnalyst);
+
+        // Check if all selected params go to the original analyst (simple case)
+        if (uniqueAnalysts.length === 1 && uniqueAnalysts[0] === originalAssigneeId) {
+          // Simple case: same analyst, just mark retestOnly and wipe selected param values
+          instance.retestOnly = selectedParamIds;
+          instance.results = instance.results.map(r => {
+            const obj = r.toObject();
+            if (selectedParamIds.includes(obj.parameterId)) {
+              return { ...obj, value: '', testMethod: '', isSaved: false };
+            }
+            return obj; // keep approved values intact
+          });
+          instance.status = 'PENDING';
+          await instance.save();
+
+          await createNotification({
+            recipient: instance.assignedTo,
+            type: 'WARNING',
+            title: 'Partial Retest Required',
+            message: `${selectedParamIds.length} parameter(s) in test ${instance.testCode} need retesting.`,
+            relatedJobId: instance.jobId,
+            relatedInstanceId: instance._id,
+            link: '/assistant'
+          });
+        } else {
+          // Complex case: multiple analysts
+          // The original instance keeps the params assigned to the original analyst (if any)
+          const originalAnalystParams = byAnalyst[originalAssigneeId] || [];
+          
+          if (originalAnalystParams.length > 0) {
+            // Original analyst retests some params
+            instance.retestOnly = originalAnalystParams;
+            instance.results = instance.results.map(r => {
+              const obj = r.toObject();
+              if (originalAnalystParams.includes(obj.parameterId)) {
+                return { ...obj, value: '', testMethod: '', isSaved: false };
+              }
+              return obj;
+            });
+            instance.status = 'PENDING';
+            await instance.save();
+
+            await createNotification({
+              recipient: instance.assignedTo,
+              type: 'WARNING',
+              title: 'Partial Retest Required',
+              message: `${originalAnalystParams.length} parameter(s) in test ${instance.testCode} need retesting.`,
+              relatedJobId: instance.jobId,
+              relatedInstanceId: instance._id,
+              link: '/assistant'
+            });
+          } else {
+            // Original analyst has no params to retest — keep instance but mark it waiting
+            // We'll set retestOnly to empty and status stays PENDING_HEAD_REVIEW until
+            // the split instances complete and merge back. Actually, simpler approach:
+            // mark original instance as waiting for the splits to complete.
+            instance.retestOnly = [];
+            instance.status = 'PENDING'; // will be re-submitted once splits merge
+            // Wipe only selected params
+            instance.results = instance.results.map(r => {
+              const obj = r.toObject();
+              if (selectedParamIds.includes(obj.parameterId)) {
+                return { ...obj, value: '', testMethod: '', isSaved: false };
+              }
+              return obj;
+            });
+            await instance.save();
+          }
+
+          // Create new instances for other analysts
+          for (const [analystId, paramIds] of Object.entries(byAnalyst)) {
+            if (analystId === originalAssigneeId) continue; // already handled above
+
+            // Build results array with only the params for this analyst (wiped)
+            const analystResults = instance.previousResults
+              .filter(r => paramIds.includes(r.parameterId))
+              .map(r => ({
+                ...r.toObject(),
+                value: '',
+                testMethod: '',
+                isSaved: false,
+                assignedTo: analystId
+              }));
+
+            // Create a sub-instance linked to the parent
+            const subInstance = new TestInstance({
+              jobId: instance.jobId,
+              testCode: `${instance.testCode}-R${Date.now().toString(36).slice(-4)}`,
+              clientName: instance.clientName,
+              deadline: instance.deadline,
+              assignedTo: analystId,
+              status: 'PENDING',
+              results: analystResults,
+              retestOnly: paramIds,
+              reviewHistory: [],
+              createdBy: req.user._id,
+              version: instance.version,
+              parentInstanceId: instance._id
+            });
+            await subInstance.save();
+
+            await createNotification({
+              recipient: analystId,
+              type: 'WARNING',
+              title: 'Retest Assigned',
+              message: `You have been assigned ${paramIds.length} parameter(s) for retest on ${instance.testCode}.`,
+              relatedJobId: instance.jobId,
+              relatedInstanceId: subInstance._id,
+              link: '/assistant'
+            });
+          }
+        }
+      } else {
+        // ── Legacy: full reassignment (all params wiped) ──
+        instance.retestOnly = [];
+        instance.results = instance.results.map(r => ({
+          ...r.toObject(),
+          value: ''
+        }));
+        instance.status = 'PENDING';
+        await instance.save();
+
+        await createNotification({
+          recipient: instance.assignedTo,
+          type: 'WARNING',
+          title: 'Job Reassigned',
+          message: `Your results for test ${instance.testCode} were rejected by HEAD. Please revise.`,
+          relatedJobId: instance.jobId,
+          relatedInstanceId: instance._id,
+          link: '/assistant'
+        });
+      }
 
       await notifyLabHeads({
         type: 'INFO',
         title: 'Job Reassigned by HEAD',
-        message: `HEAD rejected results for test ${instance.testCode} and sent it back to the analyst.`,
+        message: `HEAD rejected results for test ${instance.testCode} and sent it back for retesting.`,
         relatedJobId: instance.jobId,
         relatedInstanceId: instance._id
       });
     }
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('TEST_REVIEWED');
+    }
+
     res.json(instance);
   } catch (err) {
+    console.error('Error processing review:', err);
     res.status(500).json({ message: 'Error processing review', error: err.message });
   }
 });
@@ -339,10 +485,37 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
         if (job.distribution.micro.required && isDeptCompleted('micro')) {
           job.distribution.micro.status = 'COMPLETED';
         }
-        if (job.distribution.macro.required && (isDeptCompleted('macro') || isDeptCompleted('chemical'))) {
-          job.distribution.macro.status = 'COMPLETED';
+        if (job.distribution.chemical.required && (isDeptCompleted('chemical'))) {
+          job.distribution.chemical.status = 'COMPLETED';
         }
-        await job.save();
+        await job.save({ validateBeforeSave: false });
+
+        // ── Sequential flow: notify first dept HEAD to hand over sample ──
+        if (job.sampleFlow?.type === 'SEQUENTIAL') {
+          const firstDept = job.sampleFlow.firstDepartment; // 'micro' or 'chemical'
+          const secondDept = firstDept === 'micro' ? 'chemical' : 'micro';
+
+          // Check if the first department just completed
+          if (job.distribution[firstDept]?.status === 'COMPLETED' && 
+              job.distribution[secondDept]?.status === 'AWAITING_TRANSFER') {
+            
+            const firstDeptLabel = firstDept === 'chemical' ? 'Chemical' : 'Micro';
+            const secondDeptLabel = secondDept === 'chemical' ? 'Chemical' : 'Micro';
+            const deptRegex = firstDept === 'micro' ? /^micro$/i : /^(chemical|chemical)$/i;
+            
+            const firstDeptHeads = await User.find({ role: 'HEAD', department: { $regex: deptRegex } });
+            for (const head of firstDeptHeads) {
+              await createNotification({
+                recipient: head._id,
+                type: 'ACTION_REQUIRED',
+                title: 'Sample Hand-Over Required',
+                message: `${firstDeptLabel} testing for job ${job.jobCode} is complete. Please hand over the sample to ${secondDeptLabel} department.`,
+                relatedJobId: job._id,
+                link: '/head/dispatcher'
+              });
+            }
+          }
+        }
       }
     }
 
@@ -374,6 +547,10 @@ router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (r
       });
     }
 
+    if (req.app.get('io')) {
+      req.app.get('io').emit('TEST_REVIEWED');
+    }
+
     res.json(instance);
   } catch (err) {
     res.status(500).json({ message: 'Error processing lab review', error: err.message });
@@ -402,7 +579,7 @@ router.post('/instances/:id/reopen', protect, authorize('LAB_HEAD'), async (req,
     const job = await Job.findById(instance.jobId);
     if (job) {
       // Determine which department this instance belongs to
-      const dept = ['micro', 'macro'].find(d => {
+      const dept = ['micro', 'chemical'].find(d => {
         return job.distribution[d]?.required &&
           String(job.distribution[d]?.assignedTo) === String(instance.createdBy);
       });

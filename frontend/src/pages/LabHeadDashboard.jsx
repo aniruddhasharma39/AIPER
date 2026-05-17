@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Routes, Route, useLocation, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Trash2, Edit, Activity, Users as UsersIcon, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, X, Calendar } from 'lucide-react';
+import { Trash2, Edit, Activity, Users as UsersIcon, Clock, CheckCircle, FileText, ClipboardCheck, RotateCcw, ChevronDown, ChevronRight, X, Calendar, ArrowRightLeft } from 'lucide-react';
 import JobLogTable from '../components/JobLogTable';
 import ReportViewer from '../components/ReportViewer';
 import { AuthContext } from '../context/AuthContext';
 import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
 import Spinner from '../components/Spinner';
+import { useSocket } from '../context/SocketContext';
 
 function Dashboard() {
   const { user } = useContext(AuthContext);
@@ -33,13 +34,13 @@ function Dashboard() {
         const computeStats = (jobs, instances, users) => {
           const ongoingJobs = jobs.filter(j => {
             const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
-            const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
-            return !(microDone && macroDone);
+            const chemicalDone = !j.distribution?.chemical?.required || j.distribution.chemical.status === 'COMPLETED';
+            return !(microDone && chemicalDone);
           }).length;
           const completedJobs = jobs.filter(j => {
             const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
-            const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
-            return microDone && macroDone;
+            const chemicalDone = !j.distribution?.chemical?.required || j.distribution.chemical.status === 'COMPLETED';
+            return microDone && chemicalDone;
           }).length;
           const activeAnalysts = new Set(
             instances.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
@@ -351,7 +352,7 @@ function UsersPage() {
                 <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.4rem', fontWeight: 500 }}>Department</label>
                 <select value={formData.department} onChange={e => setFormData({...formData, department: e.target.value})} required>
                   <option value="Micro">Micro</option>
-                  <option value="Macro">Chemical</option>
+                  <option value="Chemical">Chemical</option>
                 </select>
               </div>
             </div>
@@ -398,7 +399,7 @@ const BLANK_FORM = {
   customer_name: '', customer_address: '', contact_person: '',
   mobile_number: '', email: '', customer_reference_no: '',
   // Sample
-  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: 'ml',
+  sample_name: '', sample_id: '', sample_quantity: '', sample_quantity_unit: 'ml', sample_count: 1,
   sample_description: '', condition_on_receipt: '',
   packing_details: '', marking_seal: '', sample_source: '',
   received_date_dd: '', received_date_mm: '', received_date_yyyy: '', received_mode: 'Select', nabl_type: '', ulr_no: '',
@@ -428,6 +429,7 @@ function Jobs() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nextSerial, setNextSerial] = useState(null); // 4-digit auto-increment serial
   const [reopenParentId, setReopenParentId] = useState(null);
+  const [editingJobId, setEditingJobId] = useState(null);
 
   // Parameter search state
   const [searchTerm, setSearchTerm] = useState('');
@@ -435,6 +437,14 @@ function Jobs() {
   const [selectedParams, setSelectedParams] = useState([]);
   const [showAddParam, setShowAddParam] = useState(false);
   const [newParam, setNewParam] = useState({ name: '', type: 'Micro', unit: 'mg/L' });
+  const [sampleFlowType, setSampleFlowType] = useState('PARALLEL');
+  const [firstDepartment, setFirstDepartment] = useState('micro');
+  const [transferDeadline, setTransferDeadline] = useState('');
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [deleteConfirmJobId, setDeleteConfirmJobId] = useState(null);
+  const [heads, setHeads] = useState([]);
+  const [assignedMicroHead, setAssignedMicroHead] = useState('');
+  const [assignedChemicalHead, setAssignedChemicalHead] = useState('');
 
   const toggleSection = (s) => setSections(prev => ({ ...prev, [s]: !prev[s] }));
   const setField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
@@ -490,7 +500,17 @@ function Jobs() {
   };
 
   const fetchHeads = async () => {
-    // Heads fetch removed if not used for manual assignment
+    try {
+      const res = await axios.get('http://localhost:5000/api/users');
+      const allHeads = res.data.filter(u => u.role === 'HEAD');
+      setHeads(allHeads);
+      
+      // Auto-select defaults
+      const micro = allHeads.filter(h => h.department === 'Micro');
+      if (micro.length > 0) setAssignedMicroHead(micro[0]._id);
+      const chemical = allHeads.filter(h => h.department === 'Chemical');
+      if (chemical.length > 0) setAssignedChemicalHead(chemical[0]._id);
+    } catch (err) { console.error(err); }
   };
 
   const fetchNextSerial = async () => {
@@ -506,6 +526,7 @@ function Jobs() {
   useEffect(() => { 
     fetchJobs(); 
     fetchNextSerial(); 
+    fetchHeads();
   }, []);
 
   // Parameter search debounce
@@ -527,47 +548,59 @@ function Jobs() {
   useEffect(() => {
     if (location.state?.reopenJob) {
       const j = location.state.reopenJob;
-      setFormData({
-        ...BLANK_FORM,
-        customer_name: j.clientName || '',
-        customer_address: j.customer?.customer_address || '',
-        contact_person: j.customer?.contact_person || '',
-        mobile_number: j.customer?.mobile_number || '',
-        email: j.customer?.email || '',
-        customer_reference_no: j.customer?.customer_reference_no || '',
-        sample_name: j.sample?.sample_name || '',
-        sample_id: j.sample?.sample_id || '',
-        sample_quantity: j.sample?.sample_quantity?.split(' ')[0] || '',
-        sample_quantity_unit: j.sample?.sample_quantity?.split(' ')[1] || 'ml',
-        sample_description: j.sample?.sample_description || '',
-        condition_on_receipt: j.sample?.condition_on_receipt || '',
-        packing_details: j.sample?.packing_details || '',
-        marking_seal: j.sample?.marking_seal || '',
-        sample_source: j.sample?.sample_source || '',
-        received_date_dd: j.sample?.received_date ? new Date(j.sample.received_date).getDate().toString().padStart(2, '0') : '',
-        received_date_mm: j.sample?.received_date ? (new Date(j.sample.received_date).getMonth() + 1).toString().padStart(2, '0') : '',
-        received_date_yyyy: j.sample?.received_date ? new Date(j.sample.received_date).getFullYear().toString() : '',
-        received_mode: j.sample?.received_mode || 'Select',
-        nabl_type: j.sample?.nabl_type || '',
-        ulr_no: j.sample?.ulr_no || '',
-        test_parameters: j.sample?.test_parameters || [],
-        statement_of_conformity: j.compliance?.statement_of_conformity || '',
-        decision_rule: j.compliance?.decision_rule || '',
-        accreditation_scope: j.compliance?.accreditation_scope || '',
-        disclaimer_notes: j.compliance?.disclaimer_notes || '',
-        special_handling_instructions: j.compliance?.special_handling_instructions || '',
-        reopenReason: ''
-      });
+      populateFormFromJob(j);
       setReopenParentId(j._id);
-      setSelectedParams(j.parameters || []);
-      setShowForm(true);
-      setSections({ customer: true, sample: true, compliance: true });
       window.history.replaceState({}, document.title);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [location.state]);
 
-  const handleSubmit = async (e) => {
+  const populateFormFromJob = (j) => {
+    setFormData({
+      ...BLANK_FORM,
+      customer_name: j.clientName || '',
+      customer_address: j.customer?.customer_address || '',
+      contact_person: j.customer?.contact_person || '',
+      mobile_number: j.customer?.mobile_number || '',
+      email: j.customer?.email || '',
+      customer_reference_no: j.customer?.customer_reference_no || '',
+      sample_name: j.sample?.sample_name || '',
+      sample_id: j.sample?.sample_id || '',
+      sample_quantity: j.sample?.sample_quantity?.split(' ')[0] || '',
+      sample_quantity_unit: j.sample?.sample_quantity?.split(' ')[1] || 'ml',
+      sample_count: j.sample?.sample_count || 1,
+      sample_description: j.sample?.sample_description || '',
+      condition_on_receipt: j.sample?.condition_on_receipt || '',
+      packing_details: j.sample?.packing_details || '',
+      marking_seal: j.sample?.marking_seal || '',
+      sample_source: j.sample?.sample_source || '',
+      received_date_dd: j.sample?.received_date ? new Date(j.sample.received_date).getDate().toString().padStart(2, '0') : '',
+      received_date_mm: j.sample?.received_date ? (new Date(j.sample.received_date).getMonth() + 1).toString().padStart(2, '0') : '',
+      received_date_yyyy: j.sample?.received_date ? new Date(j.sample.received_date).getFullYear().toString() : '',
+      received_mode: j.sample?.received_mode || 'Select',
+      nabl_type: j.sample?.nabl_type || '',
+      ulr_no: j.sample?.ulr_no || '',
+      test_parameters: j.sample?.test_parameters || [],
+      statement_of_conformity: j.compliance?.statement_of_conformity || '',
+      decision_rule: j.compliance?.decision_rule || '',
+      accreditation_scope: j.compliance?.accreditation_scope || '',
+      disclaimer_notes: j.compliance?.disclaimer_notes || '',
+      special_handling_instructions: j.compliance?.special_handling_instructions || '',
+      reopenReason: ''
+    });
+    setSelectedParams(j.parameters || []);
+    setShowForm(true);
+    setSections({ customer: true, sample: true, compliance: true });
+  };
+
+  const handleEditJob = (job) => {
+    populateFormFromJob(job);
+    setEditingJobId(job._id);
+    setReopenParentId(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (!e.currentTarget.checkValidity()) {
       e.currentTarget.reportValidity();
@@ -582,19 +615,30 @@ function Jobs() {
       return;
     }
 
+    const { received_date_dd, received_date_mm, received_date_yyyy } = formData;
+    const dInt = parseInt(received_date_dd, 10);
+    const mInt = parseInt(received_date_mm, 10);
+    const yInt = parseInt(received_date_yyyy, 10);
+    const dateObj = new Date(yInt, mInt - 1, dInt);
+    if (dateObj.getFullYear() !== yInt || dateObj.getMonth() !== mInt - 1 || dateObj.getDate() !== dInt) {
+       alert("Please enter a strictly valid Received Date.");
+       return;
+    }
+
+    // If all valid, show confirmation modal
+    setShowConfirmModal(true);
+  };
+
+  const executeSubmit = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setShowConfirmModal(false);
+    
     try {
       const { received_date_dd, received_date_mm, received_date_yyyy } = formData;
-      const dInt = parseInt(received_date_dd, 10);
-      const mInt = parseInt(received_date_mm, 10);
       const yInt = parseInt(received_date_yyyy, 10);
-      const dateObj = new Date(yInt, mInt - 1, dInt);
-      if (dateObj.getFullYear() !== yInt || dateObj.getMonth() !== mInt - 1 || dateObj.getDate() !== dInt) {
-         alert("Please enter a strictly valid Received Date.");
-         setIsSubmitting(false);
-         return;
-      }
+      const mInt = parseInt(received_date_mm, 10);
+      const dInt = parseInt(received_date_dd, 10);
       const parsedDate = `${yInt}-${String(mInt).padStart(2, '0')}-${String(dInt).padStart(2, '0')}`;
       
       const parameters = selectedParams.map(p => ({
@@ -603,6 +647,8 @@ function Jobs() {
         type: p.type,
         unit: p.unit
       }));
+
+      const hasBothDepts = selectedParams.some(p => p.type === 'Micro') && selectedParams.some(p => p.type === 'Chemical');
 
       const payload = {
         customer: {
@@ -617,6 +663,7 @@ function Jobs() {
           sample_name: formData.sample_name,
           sample_id: formData.sample_id,
           sample_quantity: `${formData.sample_quantity} ${formData.sample_quantity_unit}`.trim(),
+          sample_count: parseInt(formData.sample_count) || 1,
           sample_description: formData.sample_description,
           condition_on_receipt: formData.condition_on_receipt,
           packing_details: formData.packing_details,
@@ -635,20 +682,35 @@ function Jobs() {
           disclaimer_notes: formData.disclaimer_notes,
           special_handling_instructions: formData.special_handling_instructions
         },
-        parameters
+        parameters,
+        assignedMicroHead,
+        assignedChemicalHead,
+        sampleFlow: hasBothDepts ? {
+          type: sampleFlowType,
+          firstDepartment: firstDepartment,
+          transferDeadline: (sampleFlowType === 'SEQUENTIAL' && transferDeadline) ? transferDeadline : undefined
+        } : undefined
       };
 
-      if (reopenParentId) {
+      if (editingJobId) {
+        // Editing existing job
+        await axios.put(`http://localhost:5000/api/jobs/${editingJobId}`, payload);
+      } else if (reopenParentId) {
+        // Reopening / retesting
         payload.reopenReason = formData.reopenReason;
         await axios.post(`http://localhost:5000/api/jobs/${reopenParentId}/retest`, payload);
       } else {
+        // Creating new job
         await axios.post('http://localhost:5000/api/jobs', payload);
       }
 
       setShowForm(false);
       setFormData({ ...BLANK_FORM, reopenReason: '' });
       setReopenParentId(null);
+      setEditingJobId(null);
       setSelectedParams([]);
+      setAssignedMicroHead('');
+      setAssignedChemicalHead('');
       invalidateCache(CACHE_KEYS.JOBS);
       fetchJobs();
       fetchNextSerial();
@@ -660,13 +722,17 @@ function Jobs() {
     }
   };
 
-  const handleDeleteJob = async (jobId) => {
-    const isConfirmed = window.confirm("Are you sure you want to permanently delete this job and all associated reports?");
-    if (!isConfirmed) return;
+  const handleDeleteJob = (jobId) => {
+    setDeleteConfirmJobId(jobId);
+  };
+
+  const executeDelete = async () => {
+    if (!deleteConfirmJobId) return;
     try {
-      await axios.delete(`http://localhost:5000/api/jobs/${jobId}`);
+      await axios.delete(`http://localhost:5000/api/jobs/${deleteConfirmJobId}`);
       invalidateCache(CACHE_KEYS.JOBS);
       fetchJobs();
+      setDeleteConfirmJobId(null);
     } catch (err) {
       console.error(err);
       alert('Error deleting job: ' + (err.response?.data?.message || err.message));
@@ -678,10 +744,25 @@ function Jobs() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Activity size={28} style={{ color: 'var(--color-primary)' }}/> 
-          {reopenParentId ? 'Retest / Reopen Job' : 'Job Distributor'}
+          {editingJobId ? 'Edit Job' : (reopenParentId ? 'Retest / Reopen Job' : 'Job Distributor')}
         </h1>
-        <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); if(showForm) setReopenParentId(null); }}>
-          {showForm ? 'Close Form' : '+ New Client Sample Job'}
+        <button className="btn btn-primary" onClick={() => { 
+          if (!showForm) {
+            // Pre-select first heads when opening
+            const micro = heads.filter(h => h.department === 'Micro');
+            if (micro.length > 0) setAssignedMicroHead(micro[0]._id);
+            const chemical = heads.filter(h => h.department === 'Chemical');
+            if (chemical.length > 0) setAssignedChemicalHead(chemical[0]._id);
+          }
+          setShowForm(!showForm); 
+          if(showForm) {
+            setReopenParentId(null);
+            setEditingJobId(null);
+            setAssignedMicroHead('');
+            setAssignedChemicalHead('');
+          }
+        }}>
+          {showForm ? 'Cancel Edit/Close Form' : '+ New Client Sample Job'}
         </button>
       </div>
 
@@ -713,7 +794,11 @@ function Jobs() {
               </div>
             )}
           </div>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <form 
+            onSubmit={handleSubmit} 
+            onKeyDown={(e) => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') e.preventDefault(); }} 
+            style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+          >
             {/* ── CUSTOMER INFORMATION ── */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div onClick={() => toggleSection('customer')} style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: sections.customer ? 'var(--color-surface-hover)' : 'transparent' }}>
@@ -762,6 +847,9 @@ function Jobs() {
                       <input type="number" step="0.01" min="0" value={formData.sample_quantity} onChange={e => setField('sample_quantity', e.target.value)} required style={{ flex: 1 }} />
                       <input type="text" placeholder="Unit" value={formData.sample_quantity_unit} onChange={e => setField('sample_quantity_unit', e.target.value)} required style={{ width: '90px' }} />
                     </div>
+                  </div>
+                  <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Sample Count <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <input type="number" min="1" step="1" value={formData.sample_count} onChange={e => { const v = e.target.value; if (v === '' || parseInt(v) >= 1) setField('sample_count', v); }} required style={{ width: '100%' }} placeholder="No. of samples received" />
                   </div>
                   <div><label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Received Date <span style={{color:'var(--color-danger)'}}>*</span></label>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -815,42 +903,48 @@ function Jobs() {
                   )}
                   <div style={{ gridColumn: '1 / -1' }}>
                     <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 500, fontSize: '0.9rem' }}>Search & Add Test Parameters <span style={{color:'var(--color-danger)'}}>*</span></label>
-                    <div style={{ position: 'relative', marginBottom: '1rem' }}>
-                      <input 
-                        placeholder="Type to search (e.g. Moisture, Salmonella...)" 
-                        value={searchTerm} 
-                        onChange={e => setSearchTerm(e.target.value)}
-                        style={{ width: '100%' }}
-                      />
-                      {searchTerm.trim() && (
-                        <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', maxWidth: '420px', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', zIndex: 20, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto' }}>
-                          {searchResults.map(p => (
-                            <div key={p._id} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div onClick={() => handleAddExistingParam(p)} style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>{p.name}</span>
-                                <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type} · {p.unit}</span>
+                    {!editingJobId ? (
+                      <div style={{ position: 'relative', marginBottom: '1rem' }}>
+                        <input 
+                          placeholder="Type to search (e.g. Moisture, Salmonella...)" 
+                          value={searchTerm} 
+                          onChange={e => setSearchTerm(e.target.value)}
+                          style={{ width: '100%' }}
+                        />
+                        {searchTerm.trim() && (
+                          <div style={{ position: 'absolute', top: '100%', left: 0, width: '100%', maxWidth: '420px', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', zIndex: 20, boxShadow: 'var(--shadow-md)', maxHeight: '200px', overflowY: 'auto' }}>
+                            {searchResults.map(p => (
+                              <div key={p._id} style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div onClick={() => handleAddExistingParam(p)} style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span>{p.name}</span>
+                                  <span style={{ fontSize: '0.8rem', color: p.type === 'Micro' ? 'var(--color-success)' : 'var(--color-info)' }}>{p.type} · {p.unit}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteParam(e, p)}
+                                  title={`Delete "${p.name}" from library`}
+                                  style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.2rem 0.4rem', marginLeft: '0.5rem', display: 'flex', alignItems: 'center', opacity: 0.6 }}
+                                  onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                                  onMouseLeave={e => e.currentTarget.style.opacity = 0.6}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteParam(e, p)}
-                                title={`Delete "${p.name}" from library`}
-                                style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.2rem 0.4rem', marginLeft: '0.5rem', display: 'flex', alignItems: 'center', opacity: 0.6 }}
-                                onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                                onMouseLeave={e => e.currentTarget.style.opacity = 0.6}
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                            ))}
+                            {searchResults.length === 0 && (
+                              <div style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>No parameters found.</div>
+                            )}
+                            <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); setSearchTerm(''); }}>
+                              + Add New Parameter "{searchTerm}"
                             </div>
-                          ))}
-                          {searchResults.length === 0 && (
-                            <div style={{ padding: '0.75rem 1rem', color: 'var(--color-text-muted)' }}>No parameters found.</div>
-                          )}
-                          <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-hover)', cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 500 }} onClick={() => { setShowAddParam(true); setNewParam({ ...newParam, name: searchTerm }); setSearchTerm(''); }}>
-                            + Add New Parameter "{searchTerm}"
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                        Parameters cannot be changed once a job is created. To test different parameters, please create a new job or issue a retest.
+                      </div>
+                    )}
 
                     {/* New param form */}
                     {showAddParam && (
@@ -884,16 +978,31 @@ function Jobs() {
                             border: `1px solid ${p.type === 'Micro' ? '#bbf7d0' : '#bae6fd'}`
                           }}>
                             {p.name} ({p.unit})
-                            <button type="button" onClick={() => removeParam(index)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
-                              <X size={14} />
-                            </button>
+                            {!editingJobId && (
+                              <button type="button" onClick={() => removeParam(index)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
+                                <X size={14} />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
                       {selectedParams.length > 0 && (
-                        <div style={{ marginTop: '0.8rem', fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <Activity size={14} /> 
-                          {selectedParams.filter(p => p.type === 'Micro').length} Micro · {selectedParams.filter(p => p.type === 'Chemical').length} Chemical — departments auto-assigned
+                        <div style={{ marginTop: '0.8rem', fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <Activity size={14} style={{ color: 'var(--color-text-muted)' }} /> 
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            {selectedParams.some(p => p.type === 'Micro') && (
+                              <span style={{ color: '#166534' }}>M</span>
+                            )}
+                            {selectedParams.some(p => p.type === 'Micro') && selectedParams.some(p => p.type === 'Chemical') && (
+                              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.6rem' }}>●</span>
+                            )}
+                            {selectedParams.some(p => p.type === 'Chemical') && (
+                              <span style={{ color: '#075985' }}>C</span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-muted)', marginLeft: '0.2rem' }}>
+                            Departments Assigned
+                          </span>
                         </div>
                       )}
                     </div>
@@ -922,8 +1031,115 @@ function Jobs() {
               )}
             </div>
 
+            {/* ── SAMPLE FLOW ── */}
+            {selectedParams.some(p => p.type === 'Micro') && selectedParams.some(p => p.type === 'Chemical') && (
+              <div className="card" style={{ position: 'relative', padding: 0, overflow: 'hidden', border: '2px solid var(--color-primary)', borderRadius: 'var(--radius-lg)' }}>
+                <div style={{ padding: '1rem 1.5rem', backgroundColor: 'var(--color-primary)10', display: 'flex', alignItems: 'center', gap: '0.75rem', borderBottom: '1px solid var(--color-border)' }}>
+                  <ArrowRightLeft size={20} color="var(--color-primary)" />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem' }}>Sample Flow Configuration</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Both Micro & Chemical departments are involved — choose how samples are routed.</div>
+                  </div>
+                </div>
+                <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {/* Flow Type */}
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem' }}>Flow Type <span style={{color:'var(--color-danger)'}}>*</span></label>
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      {['PARALLEL', 'SEQUENTIAL'].map(ft => (
+                        <button key={ft} type="button" onClick={() => {
+                          setSampleFlowType(ft);
+                          if (ft === 'SEQUENTIAL') setFirstDepartment('micro');
+                        }} style={{
+                          flex: 1, padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                          border: sampleFlowType === ft ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
+                          backgroundColor: sampleFlowType === ft ? 'var(--color-primary)10' : 'var(--color-surface)',
+                          color: sampleFlowType === ft ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                          fontWeight: sampleFlowType === ft ? 700 : 500, fontSize: '0.9rem', transition: 'all 0.15s'
+                        }}>
+                          {ft.charAt(0) + ft.slice(1).toLowerCase()}
+                          <div style={{ fontSize: '0.75rem', fontWeight: 400, marginTop: '0.2rem' }}>
+                            {ft === 'PARALLEL' ? 'Simultaneous testing' : 'One department tests first'}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sequential options */}
+                  {sampleFlowType === 'SEQUENTIAL' && (
+                    <>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem' }}>Initial Department</label>
+                        <div style={{ display: 'flex', gap: '0.75rem' }}>
+                          {[{val: 'micro', label: 'Initial: Microbiology'}, {val: 'chemical', label: 'Initial: Chemical'}].map(opt => (
+                            <button key={opt.val} type="button" onClick={() => setFirstDepartment(opt.val)} style={{
+                              flex: 1, padding: '0.6rem 1rem', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                              border: firstDepartment === opt.val ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
+                              backgroundColor: firstDepartment === opt.val ? 'var(--color-primary)10' : 'var(--color-surface)',
+                              color: firstDepartment === opt.val ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                              fontWeight: firstDepartment === opt.val ? 700 : 500, fontSize: '0.9rem', transition: 'all 0.15s'
+                            }}>
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem' }}>Transfer Deadline</label>
+                        <div style={{ display: 'flex', gap: '0.75rem' }}>
+                          <input type="date" value={transferDeadline.split('T')[0] || ''} onChange={e => setTransferDeadline(prev => { const t = prev.split('T')[1] || '17:00'; return `${e.target.value}T${t}`; })} style={{ flex: 1 }} />
+                          <input type="time" value={transferDeadline.split('T')[1] || ''} onChange={e => setTransferDeadline(prev => { const d = prev.split('T')[0] || ''; return `${d}T${e.target.value}`; })} style={{ flex: 1 }} />
+                        </div>
+                        <div style={{ marginTop: '0.3rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                          If not transferred by this deadline, Admin & Lab Head will be notified.
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Head Assignment ── */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', borderTop: '1px solid var(--color-border)', paddingTop: '1.25rem' }}>
+                    {selectedParams.some(p => p.type === 'Micro') && (
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem' }}>Microbiology Head <span style={{color:'var(--color-danger)'}}>*</span></label>
+                        <select 
+                          value={assignedMicroHead} 
+                          onChange={e => setAssignedMicroHead(e.target.value)} 
+                          required
+                          style={{ width: '100%' }}
+                        >
+                          {heads.filter(h => h.department === 'Micro').map(h => (
+                            <option key={h._id} value={h._id}>{h.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {selectedParams.some(p => p.type === 'Chemical') && (
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem' }}>Chemical Analysis Head <span style={{color:'var(--color-danger)'}}>*</span></label>
+                        <select 
+                          value={assignedChemicalHead} 
+                          onChange={e => setAssignedChemicalHead(e.target.value)} 
+                          required
+                          style={{ width: '100%' }}
+                        >
+                          {heads.filter(h => h.department === 'Chemical').map(h => (
+                            <option key={h._id} value={h._id}>{h.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  {editingJobId && (
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(255,255,255,0.6)', cursor: 'not-allowed', zIndex: 10 }}></div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '0.8rem 2rem' }} disabled={isSubmitting}>
-              {isSubmitting ? 'Processing...' : (reopenParentId ? 'Save Retest Job' : 'Create Job & Dispatch')}
+              {isSubmitting ? 'Processing...' : (editingJobId ? 'Save Changes' : (reopenParentId ? 'Save Retest Job' : 'Create Job & Dispatch'))}
             </button>
           </form>
         </div>
@@ -934,22 +1150,103 @@ function Jobs() {
           jobs={jobs} 
           title="All Client Sample Jobs" 
           onDeleteJob={handleDeleteJob}
+          onEditJob={handleEditJob}
           onReopen={(job) => navigate('/lab-head/jobs', { state: { reopenJob: job } })}
         />
       </div>
+
+      {/* ── CUSTOM CONFIRMATION MODAL (SUBMIT) ── */}
+      {showConfirmModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, backdropFilter: 'blur(4px)'
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem', animation: 'slideUp 0.3s ease', borderTop: '4px solid var(--color-primary)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', color: 'var(--color-primary)' }}>
+              <Activity size={32} />
+              <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Confirm Job Creation</h2>
+            </div>
+            
+            <p style={{ margin: '0 0 1.5rem 0', color: 'var(--color-text-main)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {editingJobId 
+                ? `You are about to save changes to the sample job for ${formData.customer_name}.` 
+                : `You are about to log and distribute a new sample job for ${formData.customer_name}.\n\nThis will generate job codes and notify the relevant department heads immediately.`
+              }
+            </p>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn" 
+                onClick={() => setShowConfirmModal(false)}
+                style={{ border: '1px solid var(--color-primary)', color: 'var(--color-primary)', padding: '0.6rem 2rem', backgroundColor: 'transparent' }}
+              >
+                Review Form
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={executeSubmit}
+                style={{ padding: '0.6rem 2rem' }}
+              >
+                Confirm & Dispatch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CUSTOM CONFIRMATION MODAL (DELETE) ── */}
+      {deleteConfirmJobId && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, backdropFilter: 'blur(4px)'
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem', animation: 'slideUp 0.3s ease', borderTop: '4px solid var(--color-danger)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', color: 'var(--color-danger)' }}>
+              <Trash2 size={32} />
+              <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Confirm Deletion</h2>
+            </div>
+            
+            <p style={{ margin: '0 0 1.5rem 0', color: 'var(--color-text-main)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              Are you sure you want to permanently delete this job and all associated reports?
+              <br/><br/>
+              <strong style={{ color: 'var(--color-danger)' }}>This action cannot be undone.</strong>
+            </p>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn" 
+                onClick={() => setDeleteConfirmJobId(null)}
+                style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)', padding: '0.6rem 2rem', backgroundColor: 'transparent' }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn" 
+                onClick={executeDelete}
+                style={{ padding: '0.6rem 2rem', backgroundColor: 'var(--color-danger)', color: 'white' }}
+              >
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function Audit() {
   const [jobs, setJobs] = useState([]);
-  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditLoading, setAuditLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.JOBS)
+  );
   const navigate = useNavigate();
 
   const fetchData = async () => {
     try {
-      const resJobs = await axios.get('http://localhost:5000/api/jobs');
-      setJobs(resJobs.data);
+      await fetchWithCache('http://localhost:5000/api/jobs', CACHE_KEYS.JOBS, setJobs);
     } catch (err) {
       console.error(err);
     } finally {
@@ -980,11 +1277,15 @@ function Audit() {
             Click on any job row below to view its full lifecycle history, retest cycles, and download final reports.
           </div>
         </div>
-        <JobLogTable
-          jobs={jobs}
-          title="Lifecycle Tracker"
-          onReopen={(job) => navigate('/lab-head/jobs', { state: { reopenJob: job } })}
-        />
+        {auditLoading && jobs.length === 0 ? (
+          <div className="card"><Spinner message="Loading logs..." /></div>
+        ) : (
+          <JobLogTable
+            jobs={jobs}
+            title="Lifecycle Tracker"
+            onReopen={(job) => navigate('/lab-head/jobs', { state: { reopenJob: job } })}
+          />
+        )}
       </div>
     </div>
   );
@@ -996,7 +1297,9 @@ function LabReviewQueue() {
   const [reassignNote, setReassignNote] = useState('');
   const [showReassignForm, setShowReassignForm] = useState(null);
   const [success, setSuccess] = useState('');
-  const [reviewLoading, setReviewLoading] = useState(true);
+  const [reviewLoading, setReviewLoading] = useState(
+    () => !sessionStorage.getItem(CACHE_KEYS.INSTANCES)
+  );
   const [selectedPreview, setSelectedPreview] = useState(null);
 
   const fetchReviewItems = async () => {
@@ -1010,7 +1313,24 @@ function LabReviewQueue() {
     }
   };
 
-  useEffect(() => { fetchReviewItems(); }, []);
+  const socket = useSocket();
+
+  useEffect(() => { 
+    fetchReviewItems(); 
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+    const refresh = () => { invalidateCache(CACHE_KEYS.INSTANCES); fetchReviewItems(); };
+
+    socket.on('TEST_REVIEWED', refresh);
+    socket.on('TEST_SUBMITTED', refresh);
+
+    return () => {
+      socket.off('TEST_REVIEWED', refresh);
+      socket.off('TEST_SUBMITTED', refresh);
+    };
+  }, [socket]);
 
   const handleApprove = async (id) => {
     try {

@@ -1,6 +1,9 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 
+let ioInstance = null;
+const setNotifierIo = (io) => { ioInstance = io; };
+
 /**
  * Creates a notification in the database.
  * @param {Object} params
@@ -25,6 +28,10 @@ const createNotification = async ({ recipient, type = 'INFO', title, message, li
       relatedJobId,
       relatedInstanceId
     });
+
+    if (ioInstance) {
+      ioInstance.emit('NEW_NOTIFICATION', { recipientId: recipient.toString() });
+    }
   } catch (err) {
     console.error('Error creating notification:', err);
   }
@@ -63,5 +70,6 @@ const notifyLabHeads = async ({ type = 'INFO', title, message, link, relatedJobI
 module.exports = {
   createNotification,
   notifyAdmins,
-  notifyLabHeads
+  notifyLabHeads,
+  setNotifierIo
 };

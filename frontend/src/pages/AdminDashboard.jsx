@@ -23,33 +23,53 @@ function Dashboard() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
+        let jobsData, instancesData, usersData;
+
+        // Use cache for initial render
+        const cachedJobs = sessionStorage.getItem(CACHE_KEYS.JOBS);
+        const cachedInstances = sessionStorage.getItem(CACHE_KEYS.INSTANCES);
+        const cachedUsers = sessionStorage.getItem(CACHE_KEYS.USERS);
+
+        const computeStats = (jobs, instances, users) => {
+          const ongoingJobs = jobs.filter(j => {
+            const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+            const chemicalDone = !j.distribution?.chemical?.required || j.distribution.chemical.status === 'COMPLETED';
+            return !(microDone && chemicalDone);
+          }).length;
+          const completedJobs = jobs.filter(j => {
+            const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
+            const chemicalDone = !j.distribution?.chemical?.required || j.distribution.chemical.status === 'COMPLETED';
+            return microDone && chemicalDone;
+          }).length;
+          const activeAnalysts = new Set(
+            instances.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
+          ).size;
+
+          setStats({ ongoingJobs, completedJobs, activeAnalysts });
+
+          const sortedInstances = [...instances]
+            .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+            .slice(0, 5);
+          
+          setRecentActivity(sortedInstances);
+        };
+
+        if (cachedJobs && cachedInstances && cachedUsers) {
+          computeStats(JSON.parse(cachedJobs), JSON.parse(cachedInstances), JSON.parse(cachedUsers));
+        }
+
         const [jobsRes, instancesRes, usersRes] = await Promise.all([
           axios.get('http://localhost:5000/api/jobs'),
           axios.get('http://localhost:5000/api/tests/instances'),
           axios.get('http://localhost:5000/api/users')
         ]);
 
-        const ongoingJobs = jobsRes.data.filter(j => {
-          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
-          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
-          return !(microDone && macroDone);
-        }).length;
-        const completedJobs = jobsRes.data.filter(j => {
-          const microDone = !j.distribution?.micro?.required || j.distribution.micro.status === 'COMPLETED';
-          const macroDone = !j.distribution?.macro?.required || j.distribution.macro.status === 'COMPLETED';
-          return microDone && macroDone;
-        }).length;
-        const activeAnalysts = new Set(
-          instancesRes.data.filter(i => i.status === 'PENDING' && i.assignedTo).map(i => i.assignedTo._id || i.assignedTo)
-        ).size;
-
-        setStats({ ongoingJobs, completedJobs, activeAnalysts });
-
-        const sortedInstances = instancesRes.data
-          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-          .slice(0, 5);
+        computeStats(jobsRes.data, instancesRes.data, usersRes.data);
         
-        setRecentActivity(sortedInstances);
+        sessionStorage.setItem(CACHE_KEYS.JOBS, JSON.stringify(jobsRes.data));
+        sessionStorage.setItem(CACHE_KEYS.INSTANCES, JSON.stringify(instancesRes.data));
+        sessionStorage.setItem(CACHE_KEYS.USERS, JSON.stringify(usersRes.data));
+
       } catch (err) {
         console.error('Error fetching dashboard stats:', err);
       } finally {
@@ -416,7 +436,11 @@ function Audit() {
             Click on any job row below to view its full lifecycle history, retest cycles, and download final reports.
           </div>
         </div>
-        <JobLogTable jobs={jobs} title="Global Job Lifecycle Logs" />
+        {auditLoading && jobs.length === 0 ? (
+          <div className="card"><Spinner message="Loading logs..." /></div>
+        ) : (
+          <JobLogTable jobs={jobs} title="Global Job Lifecycle Logs" />
+        )}
       </div>
 
       <div>

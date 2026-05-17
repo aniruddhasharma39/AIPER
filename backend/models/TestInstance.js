@@ -7,7 +7,8 @@ const resultParameterSchema = new mongoose.Schema({
   unit: { type: String },
   referenceRange: { type: String },
   isSaved: { type: Boolean, default: false },
-  testMethod: { type: String, default: '' } // test standard / method used by analyst
+  testMethod: { type: String, default: '' }, // test standard / method used by analyst
+  assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null } // per-parameter analyst override for selective reassignment
 });
 
 const reviewEntrySchema = new mongoose.Schema({
@@ -32,6 +33,7 @@ const testInstanceSchema = new mongoose.Schema({
   },
   results: [resultParameterSchema],
   previousResults: [resultParameterSchema], // snapshot of last submission for reference on reassignment
+  retestOnly: [{ type: String }], // parameter IDs that need retesting (empty = all need testing)
   reviewHistory: [reviewEntrySchema],        // full audit trail of approvals/rejections
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   completedAt: { type: Date },

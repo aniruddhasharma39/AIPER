@@ -7,6 +7,8 @@ import LabHeadDashboard from './pages/LabHeadDashboard';
 import AssistantDashboard from './pages/AssistantDashboard';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import NotificationsPage from './pages/NotificationsPage';
+import BugReportPage from './pages/BugReportPage';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useContext(AuthContext);
@@ -62,6 +64,20 @@ function App() {
       <Route path="/assistant/*" element={
         <ProtectedRoute allowedRoles={['ASSISTANT']}>
           <AssistantDashboard />
+        </ProtectedRoute>
+      } />
+
+      {/* Notifications — all roles */}
+      <Route path="/notifications" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'LAB_HEAD', 'HEAD', 'ASSISTANT']}>
+          <NotificationsPage />
+        </ProtectedRoute>
+      } />
+
+      {/* Bug Reports — all roles */}
+      <Route path="/report-bug" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'LAB_HEAD', 'HEAD', 'ASSISTANT']}>
+          <BugReportPage />
         </ProtectedRoute>
       } />
     </Routes>

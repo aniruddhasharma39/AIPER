@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { User, Calendar, CheckCircle, Clock, AlertTriangle, RotateCcw, FileText, Download, X, Archive } from 'lucide-react';
+import React, { useState, useContext } from 'react';
+import { User, Calendar, CheckCircle, Clock, AlertTriangle, RotateCcw, FileText, Download, X, Archive, ArrowRightLeft } from 'lucide-react';
 import ReportViewer from './ReportViewer';
+import { AuthContext } from '../context/AuthContext';
 
 export default function JobTimeline({ job, allJobs = [], onReopen }) {
-  // selectedReport = { type: 'single'|'combined', report, microReport, macroReport }
+  const { user } = useContext(AuthContext);
+  // selectedReport = { type: 'single'|'combined', report, microReport, chemicalReport }
   const [selectedReport, setSelectedReport] = useState(null);
 
   const childJobs = allJobs?.filter(j => j.parentJobId === job._id).sort((a, b) => a.retestNumber - b.retestNumber) || [];
@@ -18,7 +20,7 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
       const deptInstances = instances.filter(i => {
         const d = i.createdBy?.department?.toLowerCase();
         if (deptName === 'micro' && d === 'micro') return true;
-        if (deptName === 'macro' && (d === 'macro' || d === 'chemical')) return true;
+        if (deptName === 'chemical' && (d === 'chemical' || d === 'chemical')) return true;
         return false;
       });
       const active = deptInstances.filter(i => i.status !== 'REOPENED').sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -27,26 +29,26 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
     };
 
     const microInstance = pickInstanceByDept('micro');
-    const macroInstance = pickInstanceByDept('macro');
+    const chemicalInstance = pickInstanceByDept('chemical');
 
     // Enrich instances with parent job data for report generation
     const enrichInstance = (inst) => inst ? { ...inst, _job: cycleJob } : null;
     const richMicro = enrichInstance(microInstance);
-    const richMacro = enrichInstance(macroInstance);
+    const richChemical = enrichInstance(chemicalInstance);
 
     const microDone = microInstance?.status === 'COMPLETED';
-    const macroDone = macroInstance?.status === 'COMPLETED';
+    const chemicalDone = chemicalInstance?.status === 'COMPLETED';
 
     const microRequired = !!cycleJob.distribution?.micro?.required;
-    const macroRequired = !!cycleJob.distribution?.macro?.required;
+    const chemicalRequired = !!cycleJob.distribution?.chemical?.required;
 
-    const totalRequired = (microRequired ? 1 : 0) + (macroRequired ? 1 : 0);
-    const totalCompleted = (microRequired && microDone ? 1 : 0) + (macroRequired && macroDone ? 1 : 0);
+    const totalRequired = (microRequired ? 1 : 0) + (chemicalRequired ? 1 : 0);
+    const totalCompleted = (microRequired && microDone ? 1 : 0) + (chemicalRequired && chemicalDone ? 1 : 0);
     const progress = totalRequired === 0 ? 0 : Math.round((totalCompleted / totalRequired) * 100);
     
     // allDone should be true if progress is 100% AND at least one thing was required
     const allDone = progress === 100 && totalRequired > 0;
-    const bothDone = microRequired && macroRequired && microDone && macroDone;
+    const bothDone = microRequired && chemicalRequired && microDone && chemicalDone;
 
     const PipelineTrack = ({ title, distData, instance, deptColor, richInstance }) => {
       if (!distData?.required) return null;
@@ -91,9 +93,9 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
 
       const steps = [
         { id: 1, title: isRetest ? 'Retest Allocation' : 'Job Allocation', desc: 'Allocated by Lab Head', status: s1_status, date: cycleJob.createdAt, user: `${cycleJob.createdBy?.name || 'Lab Head'} (Lab Head)` },
-        { id: 2, title: 'Analyst Dispatch', desc: instance ? `Code: ${instance.testCode}` : 'Awaiting Dept Head Dispatch', status: s2_status, date: instance?.createdAt, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : 'Pending Dept Head' },
+        { id: 2, title: 'Analyst Dispatch', desc: instance ? `Code: ${instance.testCode}` : 'Awaiting Dept Head Dispatch', status: s2_status, date: instance?.createdAt, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') },
         { id: 3, title: 'Test Execution', desc: s3_status === 'completed' ? 'Results Submitted' : s3_status === 'warning' ? 'Reassigned – Corrections Needed' : 'Analysis in Progress', status: s3_status, date: s3_date, user: instance ? `${instance.assignedTo?.name} (Analyst)` : 'Pending Analyst' },
-        { id: 4, title: 'Dept Head Review', desc: s4_status === 'completed' ? 'Approved by Dept Head' : s4_status === 'active' ? 'Awaiting Dept Head Approval' : 'Pending Submission', status: s4_status, date: headApproval?.date, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : 'Pending Dept Head' },
+        { id: 4, title: 'Dept Head Review', desc: s4_status === 'completed' ? 'Approved by Dept Head' : s4_status === 'active' ? 'Awaiting Dept Head Approval' : 'Pending Submission', status: s4_status, date: headApproval?.date, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') },
         { id: 5, title: 'Final Lab Head Review', desc: isDeptCompleted ? 'Report Generated' : isReopened ? 'Archived (Reopened)' : s5_status === 'active' ? 'Awaiting Lab Head Approval' : 'Pending Dept Head Approval', status: s5_status, date: instance?.completedAt || labHeadApproval?.date, user: labHeadApproval?.by?.name ? `${labHeadApproval.by.name} (Lab Head)` : 'Pending Lab Head' },
       ];
 
@@ -192,7 +194,7 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
             {/* Unified Report button — only when all required parts are done */}
             {allDone && (
               <button
-                onClick={() => setSelectedReport({ type: 'combined', microReport: richMicro, macroReport: richMacro })}
+                onClick={() => setSelectedReport({ type: 'combined', microReport: richMicro, chemicalReport: richChemical })}
                 style={{ 
                   padding: '0.6rem 1.25rem', 
                   fontSize: '0.9rem', 
@@ -231,9 +233,56 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
         </div>
 
         {/* Pipeline tracks */}
-        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-          <PipelineTrack title="MICRO Department" distData={cycleJob.distribution?.micro} instance={microInstance} deptColor="#10B981" richInstance={richMicro} />
-          <PipelineTrack title="CHEMICAL Department" distData={cycleJob.distribution?.macro} instance={macroInstance} deptColor="#3B82F6" richInstance={richMacro} />
+        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'stretch' }}>
+          {cycleJob.sampleFlow?.firstDepartment === 'chemical' ? (
+            <>
+              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'chemical' || user?.department?.toLowerCase() === 'chemical') && (
+                <PipelineTrack title="CHEMICAL Department" distData={cycleJob.distribution?.chemical} instance={chemicalInstance} deptColor="#3B82F6" richInstance={richChemical} />
+              )}
+              {user?.role !== 'HEAD' && cycleJob.sampleTransfers && cycleJob.sampleTransfers.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minWidth: '150px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', padding: '1.25rem 1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: '12px', border: '1px dashed var(--color-border)', width: '100%', height: '100%', justifyContent: 'center' }}>
+                    <ArrowRightLeft size={28} style={{ color: cycleJob.sampleTransfers[0].status === 'RECEIVED' ? 'var(--color-success)' : 'var(--color-warning)' }} />
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                      Sample Transfer
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                      {cycleJob.sampleTransfers[0].status === 'RECEIVED' 
+                        ? `Received by ${cycleJob.sampleTransfers[0].receivedBy?.name?.split(' ')[0] || 'Dept'}` 
+                        : `In Transit`}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'micro') && (
+                <PipelineTrack title="MICRO Department" distData={cycleJob.distribution?.micro} instance={microInstance} deptColor="#10B981" richInstance={richMicro} />
+              )}
+            </>
+          ) : (
+            <>
+              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'micro') && (
+                <PipelineTrack title="MICRO Department" distData={cycleJob.distribution?.micro} instance={microInstance} deptColor="#10B981" richInstance={richMicro} />
+              )}
+              {user?.role !== 'HEAD' && cycleJob.sampleTransfers && cycleJob.sampleTransfers.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minWidth: '150px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', padding: '1.25rem 1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: '12px', border: '1px dashed var(--color-border)', width: '100%', height: '100%', justifyContent: 'center' }}>
+                    <ArrowRightLeft size={28} style={{ color: cycleJob.sampleTransfers[0].status === 'RECEIVED' ? 'var(--color-success)' : 'var(--color-warning)' }} />
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                      Sample Transfer
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                      {cycleJob.sampleTransfers[0].status === 'RECEIVED' 
+                        ? `Received by ${cycleJob.sampleTransfers[0].receivedBy?.name?.split(' ')[0] || 'Dept'}` 
+                        : `In Transit`}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'chemical' || user?.department?.toLowerCase() === 'chemical') && (
+                <PipelineTrack title="CHEMICAL Department" distData={cycleJob.distribution?.chemical} instance={chemicalInstance} deptColor="#3B82F6" richInstance={richChemical} />
+              )}
+            </>
+          )}
         </div>
 
         {/* Bottom report bar — when all done */}
@@ -269,7 +318,7 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
               <ReportViewer
                 isCombined
                 microReport={selectedReport.microReport}
-                macroReport={selectedReport.macroReport}
+                chemicalReport={selectedReport.chemicalReport}
                 onBack={() => setSelectedReport(null)}
               />
             ) : (

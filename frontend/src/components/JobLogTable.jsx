@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Search, ChevronDown, ChevronRight, Filter, Clock, Trash2 } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, Filter, Clock, Trash2, Edit } from 'lucide-react';
 import JobTimeline from './JobTimeline';
 
-export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDeleteJob }) {
+export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDeleteJob, onEditJob }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [expandedJobId, setExpandedJobId] = useState(null);
@@ -11,8 +11,8 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
   const getJobStatus = (job) => {
     let statuses = [];
     if (job.distribution?.micro?.required) statuses.push(job.distribution.micro.status);
-    if (job.distribution?.macro?.required) statuses.push(job.distribution.macro.status);
-    
+    if (job.distribution?.chemical?.required) statuses.push(job.distribution.chemical.status);
+
     if (statuses.length === 0) return 'PENDING';
     if (statuses.every(s => s === 'COMPLETED')) return 'COMPLETED';
     if (statuses.every(s => s === 'PENDING')) return 'PENDING';
@@ -37,7 +37,7 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
 
 
   const StatusBadge = ({ status }) => {
-    switch(status) {
+    switch (status) {
       case 'COMPLETED': return <span className="badge badge-success">Completed</span>;
       case 'IN_PROGRESS': return <span className="badge badge-warning">In Progress</span>;
       case 'REOPENED': return <span className="badge badge-warning" style={{ backgroundColor: '#f59e0b' }}>Reopened</span>;
@@ -52,19 +52,19 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           <div style={{ position: 'relative' }}>
             <Search size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-            <input 
-              type="text" 
-              placeholder="Search Client or Code..." 
-              value={searchTerm} 
-              onChange={e => setSearchTerm(e.target.value)} 
+            <input
+              type="text"
+              placeholder="Search Client or Code..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
               style={{ paddingLeft: '2.2rem', paddingRight: '1rem', paddingBottom: '0.4rem', paddingTop: '0.4rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}
             />
           </div>
           <div style={{ position: 'relative' }}>
             <Filter size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-            <select 
-              value={statusFilter} 
-              onChange={e => setStatusFilter(e.target.value)} 
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
               style={{ paddingLeft: '2.2rem', appearance: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', paddingBottom: '0.4rem', paddingTop: '0.4rem' }}
             >
               <option value="ALL">All Status</option>
@@ -101,15 +101,26 @@ export default function JobLogTable({ jobs, title = "Job Logs", onReopen, onDele
                   <td style={{ fontWeight: 500 }}>{job.clientName}</td>
                   <td>{new Date(job.createdAt).toLocaleDateString()}</td>
                   <td><StatusBadge status={getJobStatus(job)} /></td>
-                  {onDeleteJob && (
+                  {(onDeleteJob || onEditJob) && (
                     <td style={{ textAlign: 'right', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); onDeleteJob(job._id); }} 
-                        style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
-                        title="Delete Job"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      {onEditJob && getJobStatus(job) !== 'COMPLETED' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onEditJob(job); }}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
+                          title="Edit Job"
+                        >
+                          <Edit size={16} />
+                        </button>
+                      )}
+                      {onDeleteJob && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDeleteJob(job._id); }}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
+                          title="Delete Job"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>

@@ -63,4 +63,6 @@ export const CACHE_KEYS = {
   INSTANCES: 'aiper_instances',
   STATS: 'aiper_stats',
   MY_TASKS: 'aiper_my_tasks',
+  TRANSFERS_IN: 'aiper_transfers_in',
+  TRANSFERS_OUT: 'aiper_transfers_out',
 };

@@ -40,16 +40,16 @@ async function fixJobStatuses() {
       }
     }
 
-    // Check macro
-    if (job.distribution.macro.required) {
-      const macroInstances = allInstances.filter(i => {
+    // Check chemical
+    if (job.distribution.chemical.required) {
+      const chemicalInstances = allInstances.filter(i => {
         const dept = i.createdBy?.department?.toLowerCase();
-        return dept === 'macro' || dept === 'chemical';
+        return dept === 'chemical';
       });
-      if (macroInstances.length > 0 && macroInstances.every(i => i.status === 'COMPLETED')) {
-        if (job.distribution.macro.status !== 'COMPLETED') {
-          console.log(`[FIX] Job ${job.jobCode}: macro ${job.distribution.macro.status} → COMPLETED`);
-          job.distribution.macro.status = 'COMPLETED';
+      if (chemicalInstances.length > 0 && chemicalInstances.every(i => i.status === 'COMPLETED')) {
+        if (job.distribution.chemical.status !== 'COMPLETED') {
+          console.log(`[FIX] Job ${job.jobCode}: chemical ${job.distribution.chemical.status} → COMPLETED`);
+          job.distribution.chemical.status = 'COMPLETED';
           changed = true;
         }
       }

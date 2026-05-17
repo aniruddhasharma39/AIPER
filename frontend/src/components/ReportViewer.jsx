@@ -230,21 +230,21 @@ function SingleReportContent({ report, forwardedRef }) {
 }
 
 // --- Combined (Micro + Chemical) Report ---
-function CombinedReportContent({ microReport, macroReport, forwardedRef }) {
-  const job = microReport?._job || macroReport?._job || {};
+function CombinedReportContent({ microReport, chemicalReport, forwardedRef }) {
+  const job = microReport?._job || chemicalReport?._job || {};
   const customer = job.customer || {};
   const sample = job.sample || {};
 
   const { testReportNo, registrationNo } = deriveReportFields(job.jobCode);
-  const latestCompletedAt = microReport?.completedAt || macroReport?.completedAt;
+  const latestCompletedAt = microReport?.completedAt || chemicalReport?.completedAt;
   const issueDate = latestCompletedAt ? new Date(latestCompletedAt).toLocaleDateString('en-IN') : 'N/A';
   const receiptDate = job.createdAt ? new Date(job.createdAt).toLocaleDateString('en-IN') : 'N/A';
-  const tp = microReport?.testingPeriod || macroReport?.testingPeriod;
+  const tp = microReport?.testingPeriod || chemicalReport?.testingPeriod;
   const testingPeriodStr = tp?.startDate && tp?.endDate
     ? `${new Date(tp.startDate).toLocaleDateString('en-IN')} to ${new Date(tp.endDate).toLocaleDateString('en-IN')}`
     : 'N/A';
   const microAnalyst = microReport?.assignedTo?.name || 'N/A';
-  const macroAnalyst = macroReport?.assignedTo?.name || 'N/A';
+  const chemicalAnalyst = chemicalReport?.assignedTo?.name || 'N/A';
 
   const borderStyle = '1px solid #333';
   const tdStyle = { border: borderStyle, padding: '5px 8px', fontSize: '11px', verticalAlign: 'top' };
@@ -255,7 +255,7 @@ function CombinedReportContent({ microReport, macroReport, forwardedRef }) {
 
   const allResults = [
     ...(microReport?.results || []).map(r => ({ ...r, _dept: 'MICRO' })),
-    ...(macroReport?.results || []).map(r => ({ ...r, _dept: 'CHEMICAL' })),
+    ...(chemicalReport?.results || []).map(r => ({ ...r, _dept: 'CHEMICAL' })),
   ];
 
   return (
@@ -418,7 +418,7 @@ function CombinedReportContent({ microReport, macroReport, forwardedRef }) {
           <tr>
             <td style={{ width: '35%', fontSize: '11px' }}>
               {microReport && <><div>Reviewed By (Micro)</div><div style={{ fontWeight: 700 }}>{microAnalyst}</div><div>Analyst</div></>}
-              {macroReport && <><div style={{ marginTop: '8px' }}>Reviewed By (Chemical)</div><div style={{ fontWeight: 700 }}>{macroAnalyst}</div><div>Analyst</div></>}
+              {chemicalReport && <><div style={{ marginTop: '8px' }}>Reviewed By (Chemical)</div><div style={{ fontWeight: 700 }}>{chemicalAnalyst}</div><div>Analyst</div></>}
             </td>
             <td style={{ width: '30%', textAlign: 'center', fontSize: '11px', verticalAlign: 'bottom' }}>
               <strong>*End of report*</strong>
@@ -436,13 +436,13 @@ function CombinedReportContent({ microReport, macroReport, forwardedRef }) {
 }
 
 // --- Main Export ---
-export default function ReportViewer({ report, microReport, macroReport, isCombined = false, onBack }) {
+export default function ReportViewer({ report, microReport, chemicalReport, isCombined = false, onBack }) {
   const reportRef = useRef();
 
   const downloadPDF = () => {
     const element = reportRef.current;
     const filename = isCombined
-      ? `Combined_Report_${(microReport || macroReport)?.testCode?.split('-')[0] || 'Job'}.pdf`
+      ? `Combined_Report_${(microReport || chemicalReport)?.testCode?.split('-')[0] || 'Job'}.pdf`
       : `Report_${report?.testCode}.pdf`;
     html2pdf().from(element).set({
       margin: 8,
@@ -466,7 +466,7 @@ export default function ReportViewer({ report, microReport, macroReport, isCombi
 
       <div style={{ border: '1px solid #ccc', borderRadius: '4px', overflow: 'hidden' }}>
         {isCombined
-          ? <CombinedReportContent microReport={microReport} macroReport={macroReport} forwardedRef={reportRef} />
+          ? <CombinedReportContent microReport={microReport} chemicalReport={chemicalReport} forwardedRef={reportRef} />
           : <SingleReportContent report={report} forwardedRef={reportRef} />
         }
       </div>

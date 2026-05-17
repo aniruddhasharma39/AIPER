@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Play, Check, Clock, AlertTriangle, RotateCcw, Calendar } from 'lucide-react';
 import { fetchWithCache, invalidateCache, CACHE_KEYS } from '../utils/cache';
 import Spinner from '../components/Spinner';
+import { useSocket } from '../context/SocketContext';
 
 export default function AssistantDashboard() {
   const [tasks, setTasks] = useState([]);
@@ -12,6 +13,8 @@ export default function AssistantDashboard() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(() => !sessionStorage.getItem(CACHE_KEYS.MY_TASKS));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [errorModalData, setErrorModalData] = useState(null); // string for error message
 
   const fetchTasks = async () => {
     try {
@@ -28,6 +31,21 @@ export default function AssistantDashboard() {
   };
 
   useEffect(() => { fetchTasks(); }, []);
+
+  const socket = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const updateTasks = () => { invalidateCache(CACHE_KEYS.MY_TASKS); fetchTasks(); };
+
+    socket.on('JOB_DISTRIBUTED', updateTasks);
+    socket.on('TEST_REVIEWED', updateTasks);
+
+    return () => {
+      socket.off('JOB_DISTRIBUTED', updateTasks);
+      socket.off('TEST_REVIEWED', updateTasks);
+    };
+  }, [socket]);
 
   const openTask = (task) => {
     setActiveTask(task);
@@ -63,11 +81,28 @@ export default function AssistantDashboard() {
 
   const handleIndividualSave = async (index) => {
     if (isSubmitting) return;
+    
+    // Skip save for approved parameters
+    const hasRetestOnly = activeTask?.retestOnly && activeTask.retestOnly.length > 0;
+    if (hasRetestOnly && !activeTask.retestOnly.includes(resultsData[index].parameterId)) return;
+
+    const val = resultsData[index].value;
+    const testMethod = resultsData[index].testMethod;
+
+    // Validate that BOTH value and test method are filled
+    if (!val || val.trim() === '' || !testMethod || testMethod.trim() === '') {
+      setErrorModalData(`Please enter both a value and a test method for "${resultsData[index].name}"`);
+      return;
+    }
+    
+    const numericVal = parseFloat(val);
+    if (!isNaN(numericVal) && numericVal < 0) {
+      setErrorModalData(`Value for "${resultsData[index].name}" cannot be negative`);
+      return;
+    }
+
     setIsSubmitting(true);
     const updated = [...resultsData];
-    if (!updated[index].value || updated[index].value.trim() === '') {
-      updated[index].value = '0';
-    }
     updated[index].isSaved = true;
     setResultsData(updated);
 
@@ -83,17 +118,61 @@ export default function AssistantDashboard() {
       console.error(err);
       updated[index].isSaved = false;
       setResultsData(updated);
+      setErrorModalData(err.response?.data?.message || 'Error saving parameter');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleSaveProgress = async () => {
+    const hasRetestOnly = activeTask?.retestOnly && activeTask.retestOnly.length > 0;
+    // Only validate retestable params
+    const editableParams = hasRetestOnly 
+      ? resultsData.filter(r => activeTask.retestOnly.includes(r.parameterId))
+      : resultsData;
+
+    // Find partially filled params (one field filled but not the other) or negative values
+    const partiallyFilled = editableParams.filter(r => {
+      const hasVal = r.value && r.value.trim() !== '';
+      const hasMethod = r.testMethod && r.testMethod.trim() !== '';
+      return hasVal !== hasMethod; // one filled, the other empty
+    });
+
+    const negativeParams = editableParams.filter(r => {
+      const num = parseFloat(r.value);
+      return !isNaN(num) && num < 0;
+    });
+
+    if (partiallyFilled.length > 0 || negativeParams.length > 0) {
+      const issues = [];
+      if (partiallyFilled.length > 0) {
+        issues.push(`Partially filled (need both value & test method): ${partiallyFilled.map(p => p.name).join(', ')}`);
+      }
+      if (negativeParams.length > 0) {
+        issues.push(`Negative values: ${negativeParams.map(p => p.name).join(', ')}`);
+      }
+      setErrorModalData(`Some parameters have issues and won't be saved:\n\n${issues.join('\n')}\n\nAll other valid parameters will be saved.`);
+    }
+
     if (isSubmitting) return;
     setIsSubmitting(true);
+    
+    // Mark only fully valid fields (both value + method filled, non-negative) as saved
+    const updatedResults = resultsData.map(r => {
+      const hasVal = r.value && r.value.trim() !== '';
+      const hasMethod = r.testMethod && r.testMethod.trim() !== '';
+      const num = parseFloat(r.value);
+      const isNeg = !isNaN(num) && num < 0;
+      if (hasVal && hasMethod && !isNeg) {
+        return { ...r, isSaved: true };
+      }
+      return r;
+    });
+    setResultsData(updatedResults);
+
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${activeTask._id}/save-progress`, {
-        results: resultsData,
+        results: updatedResults,
         testingPeriod: {
           startDate: testingPeriod.startDate || null,
           endDate: testingPeriod.endDate || null
@@ -105,19 +184,51 @@ export default function AssistantDashboard() {
       setTimeout(() => setSuccess(''), 4000);
     } catch (err) {
       console.error(err);
+      setErrorModalData(err.response?.data?.message || 'Error saving draft');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handlePreSubmit = (e) => {
     e.preventDefault();
-    const hasAnyValue = resultsData.some(r => r.value && r.value.trim() !== '');
-    if (!hasAnyValue) {
-      alert("Please provide at least one result value before submitting for review.");
+    
+    const hasRetestOnly = activeTask?.retestOnly && activeTask.retestOnly.length > 0;
+    const editableParams = hasRetestOnly 
+      ? resultsData.filter(r => activeTask.retestOnly.includes(r.parameterId))
+      : resultsData;
+
+    // 1. Check if all editable fields are saved
+    const unsavedParams = editableParams.filter(r => !r.isSaved);
+    if (unsavedParams.length > 0) {
+      setErrorModalData(`Please save all parameters before submitting. \n\nUnsaved fields: ${unsavedParams.map(p => p.name).join(', ')}`);
       return;
     }
 
+    // 2. Double check values
+    const invalidParams = editableParams.filter(r => {
+      const val = r.value;
+      const testMethod = r.testMethod;
+      if (!val || val.trim() === '' || !testMethod || testMethod.trim() === '') return true;
+      const num = parseFloat(val);
+      return !isNaN(num) && num < 0;
+    });
+
+    if (invalidParams.length > 0) {
+      setErrorModalData(`Some parameters have invalid or empty values. \n\nInvalid fields: ${invalidParams.map(p => p.name).join(', ')}`);
+      return;
+    }
+
+    if (!testingPeriod.startDate || !testingPeriod.endDate) {
+      setErrorModalData("Please provide both start and end dates for the testing period.");
+      return;
+    }
+
+    setShowConfirmModal(true);
+  };
+
+  const executeSubmit = async () => {
+    setShowConfirmModal(false);
     if (isSubmitting) return;
     setIsSubmitting(true);
 
@@ -136,6 +247,7 @@ export default function AssistantDashboard() {
       setTimeout(() => setSuccess(''), 4000);
     } catch (err) {
       console.error(err);
+      setErrorModalData(err.response?.data?.message || 'An error occurred while submitting the task.');
     } finally {
       setIsSubmitting(false);
     }
@@ -215,7 +327,7 @@ export default function AssistantDashboard() {
             );
           })()}
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <form onSubmit={handlePreSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div style={{ padding: '1.25rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
                 <Calendar size={16} style={{ color: 'var(--color-primary)' }} />
@@ -246,9 +358,21 @@ export default function AssistantDashboard() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {resultsData.map((resItem, i) => {
                   const prevResult = activeTask.previousResults?.find(pr => pr.parameterId === resItem.parameterId);
+                  const hasRetestOnly = activeTask.retestOnly && activeTask.retestOnly.length > 0;
+                  const isRetestParam = !hasRetestOnly || activeTask.retestOnly.includes(resItem.parameterId);
+                  const isApprovedParam = hasRetestOnly && !isRetestParam;
+
                   return (
-                    <div key={resItem.parameterId} style={{ padding: '1rem 1.25rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', borderLeft: resItem.isSaved ? '4px solid var(--color-success)' : '1px solid var(--color-border)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                    <div key={resItem.parameterId} style={{ 
+                      padding: '1rem 1.25rem', 
+                      backgroundColor: isApprovedParam ? 'var(--color-surface)' : 'var(--color-surface-hover)', 
+                      borderRadius: 'var(--radius-md)', 
+                      border: '1px solid var(--color-border)', 
+                      borderLeft: isApprovedParam ? '4px solid var(--color-success)' : (resItem.isSaved ? '4px solid var(--color-success)' : '4px solid var(--color-warning)'),
+                      transition: 'all 0.2s ease',
+                      opacity: isApprovedParam ? 0.7 : 1
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: isApprovedParam ? '0' : '0.75rem' }}>
                         <div>
                           <div style={{ fontWeight: 600, color: 'var(--color-text-main)', fontSize: '0.95rem' }}>{i + 1}. {resItem.name}</div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.15rem' }}>
@@ -260,23 +384,67 @@ export default function AssistantDashboard() {
                             </div>
                           )}
                         </div>
-                        <button type="button" onClick={() => handleIndividualSave(i)} disabled={isSubmitting} className="btn" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', backgroundColor: resItem.isSaved ? 'var(--color-success)' : 'var(--color-primary)', color: 'white', height: 'fit-content' }}>
-                          {resItem.isSaved ? <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><Check size={14}/> Saved</span> : (isSubmitting ? 'Saving...' : 'Save Parameter')}
-                        </button>
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 500, marginBottom: '0.3rem', color: 'var(--color-text-muted)' }}>Observed Result <span style={{ color: 'var(--color-danger)' }}>*</span></label>
-                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            <input type="text" value={resItem.value} onChange={e => handleResultChange(i, 'value', e.target.value)} placeholder="Enter value…" style={inputStyle} />
-                            <span style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', minWidth: '36px' }}>{resItem.unit}</span>
-                          </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
+                          {isApprovedParam ? (
+                            <span style={{ 
+                              display: 'flex', alignItems: 'center', gap: '0.3rem',
+                              padding: '0.3rem 0.7rem', borderRadius: 'var(--radius-sm)',
+                              backgroundColor: 'rgba(46, 204, 113, 0.1)', color: 'var(--color-success)',
+                              fontSize: '0.8rem', fontWeight: 600
+                            }}>
+                              <Check size={14}/> Approved
+                            </span>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => handleIndividualSave(i)} disabled={isSubmitting} className="btn" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', backgroundColor: resItem.isSaved ? 'var(--color-success)' : 'var(--color-primary)', color: 'white', height: 'fit-content' }}>
+                                {resItem.isSaved ? <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><Check size={14}/> Saved</span> : (isSubmitting ? 'Saving...' : 'Save Parameter')}
+                              </button>
+                              {!resItem.isSaved && (
+                                <span style={{ fontSize: '0.7rem', color: 'var(--color-warning)', fontWeight: 500 }}>Unsaved changes</span>
+                              )}
+                            </>
+                          )}
                         </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 500, marginBottom: '0.3rem', color: 'var(--color-text-muted)' }}>Test Method</label>
-                          <input type="text" value={resItem.testMethod} onChange={e => handleResultChange(i, 'testMethod', e.target.value)} placeholder="Standard / method used…" style={inputStyle} />
-                        </div>
                       </div>
+                      {!isApprovedParam && (
+                        <>
+                          {isApprovedParam ? (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+                              <div><span style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Value:</span> <span style={{ fontWeight: 600 }}>{resItem.value || '—'}</span> {resItem.unit}</div>
+                              <div><span style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>Method:</span> {resItem.testMethod || '—'}</div>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 500, marginBottom: '0.3rem', color: 'var(--color-text-muted)' }}>
+                                  Observed Result <span style={{ color: 'var(--color-danger)' }}>*</span>
+                                </label>
+                                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                  <input 
+                                    type="text" 
+                                    value={resItem.value} 
+                                    onChange={e => handleResultChange(i, 'value', e.target.value)} 
+                                    placeholder="Enter value…" 
+                                    style={{
+                                      ...inputStyle,
+                                      borderColor: (resItem.value && !isNaN(parseFloat(resItem.value)) && parseFloat(resItem.value) < 0) ? 'var(--color-danger)' : 'var(--color-border)',
+                                      outlineColor: (resItem.value && !isNaN(parseFloat(resItem.value)) && parseFloat(resItem.value) < 0) ? 'var(--color-danger)' : 'var(--color-primary)'
+                                    }} 
+                                  />
+                                  <span style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', minWidth: '36px' }}>{resItem.unit}</span>
+                                </div>
+                                {resItem.value && !isNaN(parseFloat(resItem.value)) && parseFloat(resItem.value) < 0 && (
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--color-danger)', marginTop: '0.2rem' }}>Value cannot be negative</div>
+                                )}
+                              </div>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 500, marginBottom: '0.3rem', color: 'var(--color-text-muted)' }}>Test Method</label>
+                                <input type="text" value={resItem.testMethod} onChange={e => handleResultChange(i, 'testMethod', e.target.value)} placeholder="Standard / method used…" style={inputStyle} />
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -320,6 +488,78 @@ export default function AssistantDashboard() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* ── CUSTOM CONFIRMATION MODAL ── */}
+      {showConfirmModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, backdropFilter: 'blur(4px)'
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem', animation: 'slideUp 0.3s ease', borderTop: '4px solid var(--color-primary)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', color: 'var(--color-primary)' }}>
+              <Check size={32} />
+              <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Submit Analysis</h2>
+            </div>
+            
+            <p style={{ margin: '0 0 1.5rem 0', color: 'var(--color-text-main)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              Are you sure you want to submit the results for <strong>Test {activeTask?.testCode}</strong>?
+            </p>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                type="button"
+                className="btn" 
+                onClick={() => setShowConfirmModal(false)}
+                style={{ border: '1px solid var(--color-primary)', color: 'var(--color-primary)', padding: '0.6rem 2rem', backgroundColor: 'transparent' }}
+                disabled={isSubmitting}
+              >
+                Review Again
+              </button>
+              <button 
+                type="button"
+                className="btn btn-primary" 
+                onClick={executeSubmit}
+                style={{ padding: '0.6rem 2rem' }}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Submitting...' : 'Confirm Submission'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CUSTOM ERROR MODAL ── */}
+      {errorModalData && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, backdropFilter: 'blur(4px)'
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2rem', animation: 'slideUp 0.3s ease', borderTop: '4px solid var(--color-danger)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', color: 'var(--color-danger)' }}>
+              <AlertTriangle size={32} />
+              <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Validation Error</h2>
+            </div>
+            
+            <p style={{ margin: '0 0 1.5rem 0', color: 'var(--color-text-main)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {errorModalData}
+            </p>
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                type="button"
+                className="btn" 
+                onClick={() => setErrorModalData(null)}
+                style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)', padding: '0.6rem 2rem', backgroundColor: 'transparent' }}
+              >
+                Go Back & Fix
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
