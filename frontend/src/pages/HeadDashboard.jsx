@@ -888,7 +888,7 @@ function ReviewQueue() {
   const handleApprove = async (id) => {
     try {
       await axios.put(`http://localhost:5000/api/tests/instances/${id}/review`, { action: 'APPROVE' });
-      setSuccess('Approved and forwarded to Lab Head for final review.');
+      setSuccess('Approved and Completed. Report Generated.');
       invalidateCache(CACHE_KEYS.INSTANCES);
       fetchReviewItems();
       setSelectedInstance(null);
@@ -971,7 +971,7 @@ function ReviewQueue() {
       <h1 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <ClipboardCheck size={28} style={{ color: 'var(--color-primary)' }} /> Review Queue
       </h1>
-      <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>Review analyst submissions before forwarding to Lab Head.</p>
+      <p style={{ color: 'var(--color-text-muted)', marginBottom: '2rem' }}>Review analyst submissions and finalize the reports.</p>
 
       {success && (
         <div style={{ 
@@ -1149,7 +1149,7 @@ function ReviewQueue() {
                   ) : (
                     <div style={{ display: 'flex', gap: '1rem' }}>
                       <button onClick={() => handleApprove(inst._id)} className="btn btn-success" style={{ flex: 1, justifyContent: 'center' }}>
-                        <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Forward to Lab Head
+                        <CheckCircle size={16} style={{ marginRight: '0.5rem' }} /> Approve & Complete
                       </button>
                       <button onClick={() => enterReassignMode(inst)} className="btn" style={{ flex: 1, justifyContent: 'center', backgroundColor: 'var(--color-warning)', color: 'white', border: 'none' }}>
                         <RotateCcw size={16} style={{ marginRight: '0.5rem' }} /> Reassign to Analyst

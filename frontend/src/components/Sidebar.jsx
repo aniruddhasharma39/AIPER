@@ -18,7 +18,6 @@ export default function Sidebar() {
       case 'LAB_HEAD':
         return [
           { to: '/lab-head', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
-          { to: '/lab-head/review', icon: <ClipboardCheck size={20} />, label: 'Review Queue' },
           { to: '/lab-head/jobs', icon: <Activity size={20} />, label: 'Job Distributor' },
           { to: '/lab-head/users', icon: <Users size={20} />, label: 'User Management' },
           { to: '/lab-head/audit', icon: <FileText size={20} />, label: 'Activity Logs' },

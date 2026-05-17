@@ -78,25 +78,19 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
       let s4_status = 'pending';
       if (instance && instance.status !== 'PENDING') {
         if (instance.status === 'PENDING_HEAD_REVIEW') s4_status = 'active';
-        else if (headApproval || instance.status === 'PENDING_LAB_HEAD_REVIEW' || instance.status === 'COMPLETED') s4_status = 'completed';
+        else if (headApproval || instance.status === 'COMPLETED') s4_status = 'completed';
       }
-
-      let s5_status = 'pending';
-      if (instance && (instance.status === 'PENDING_LAB_HEAD_REVIEW' || instance.status === 'COMPLETED')) {
-        if (instance.status === 'PENDING_LAB_HEAD_REVIEW') s5_status = 'active';
-        else if (instance.status === 'COMPLETED') s5_status = 'completed';
-      }
+      
       const isReopened = instance?.status === 'REOPENED';
-      if (isReopened) s5_status = 'reopened';
+      if (isReopened) s4_status = 'reopened';
 
-      const isDeptCompleted = s5_status === 'completed';
+      const isDeptCompleted = s4_status === 'completed';
 
       const steps = [
         { id: 1, title: isRetest ? 'Retest Allocation' : 'Job Allocation', desc: 'Allocated by Lab Head', status: s1_status, date: cycleJob.createdAt, user: `${cycleJob.createdBy?.name || 'Lab Head'} (Lab Head)` },
         { id: 2, title: 'Analyst Dispatch', desc: instance ? `Code: ${instance.testCode}` : 'Awaiting Dept Head Dispatch', status: s2_status, date: instance?.createdAt, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') },
         { id: 3, title: 'Test Execution', desc: s3_status === 'completed' ? 'Results Submitted' : s3_status === 'warning' ? 'Reassigned – Corrections Needed' : 'Analysis in Progress', status: s3_status, date: s3_date, user: instance ? `${instance.assignedTo?.name} (Analyst)` : 'Pending Analyst' },
-        { id: 4, title: 'Dept Head Review', desc: s4_status === 'completed' ? 'Approved by Dept Head' : s4_status === 'active' ? 'Awaiting Dept Head Approval' : 'Pending Submission', status: s4_status, date: headApproval?.date, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') },
-        { id: 5, title: 'Final Lab Head Review', desc: isDeptCompleted ? 'Report Generated' : isReopened ? 'Archived (Reopened)' : s5_status === 'active' ? 'Awaiting Lab Head Approval' : 'Pending Dept Head Approval', status: s5_status, date: instance?.completedAt || labHeadApproval?.date, user: labHeadApproval?.by?.name ? `${labHeadApproval.by.name} (Lab Head)` : 'Pending Lab Head' },
+        { id: 4, title: 'Dept Head Review', desc: isDeptCompleted ? 'Report Generated' : isReopened ? 'Archived (Reopened)' : s4_status === 'active' ? 'Awaiting Dept Head Approval' : 'Pending Submission', status: s4_status, date: instance?.completedAt || headApproval?.date, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') }
       ];
 
       return (

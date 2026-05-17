@@ -19,7 +19,7 @@ router.get('/instances', protect, async (req, res) => {
       // HEAD sees: instances they created, excluding REOPENED
       query = { createdBy: req.user._id, status: { $ne: 'REOPENED' } };
     } else if (req.user.role === 'LAB_HEAD') {
-      // LAB_HEAD sees all instances (Review Queue filters client-side for PENDING_LAB_HEAD_REVIEW)
+      // LAB_HEAD sees all instances
       query = {};
     } else if (req.user.role === 'ASSISTANT') {
       // ASSISTANT sees: only their PENDING tasks
@@ -222,7 +222,7 @@ router.put('/instances/:id/results', protect, authorize('ASSISTANT'), async (req
   }
 });
 
-// HEAD reviews an instance: APPROVE (→ PENDING_LAB_HEAD_REVIEW) or REASSIGN (→ PENDING)
+// HEAD reviews an instance: APPROVE (→ COMPLETED) or REASSIGN (→ PENDING)
 router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res) => {
   try {
     const { action, note, selectedParams } = req.body;
@@ -246,17 +246,75 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
     });
 
     if (action === 'APPROVE') {
-      instance.status = 'PENDING_LAB_HEAD_REVIEW';
+      instance.status = 'COMPLETED';
+      instance.completedAt = new Date();
       instance.retestOnly = []; // clear any previous retest flags
       await instance.save();
 
+      // Now update job distribution status to COMPLETED
+      const job = await Job.findById(instance.jobId);
+      if (job) {
+        // Find all instances for this job (this now sees the saved COMPLETED status)
+        const allInstances = await TestInstance.find({ jobId: instance.jobId }).populate('createdBy', 'department');
+        
+        // Helper to check if all instances created by a specific department are completed
+        const isDeptCompleted = (deptName) => {
+          const deptInstances = allInstances.filter(i => i.createdBy?.department?.toLowerCase() === deptName.toLowerCase());
+          if (deptInstances.length === 0) return false;
+          return deptInstances.every(i => i.status === 'COMPLETED');
+        };
+
+        if (job.distribution.micro.required && isDeptCompleted('micro')) {
+          job.distribution.micro.status = 'COMPLETED';
+        }
+        if (job.distribution.chemical.required && (isDeptCompleted('chemical'))) {
+          job.distribution.chemical.status = 'COMPLETED';
+        }
+        await job.save({ validateBeforeSave: false });
+
+        // ── Sequential flow: notify first dept HEAD to hand over sample ──
+        if (job.sampleFlow?.type === 'SEQUENTIAL') {
+          const firstDept = job.sampleFlow.firstDepartment; // 'micro' or 'chemical'
+          const secondDept = firstDept === 'micro' ? 'chemical' : 'micro';
+
+          // Check if the first department just completed
+          if (job.distribution[firstDept]?.status === 'COMPLETED' && 
+              job.distribution[secondDept]?.status === 'AWAITING_TRANSFER') {
+            
+            const firstDeptLabel = firstDept === 'chemical' ? 'Chemical' : 'Micro';
+            const secondDeptLabel = secondDept === 'chemical' ? 'Chemical' : 'Micro';
+            const deptRegex = firstDept === 'micro' ? /^micro$/i : /^(chemical|chemical)$/i;
+            
+            const firstDeptHeads = await User.find({ role: 'HEAD', department: { $regex: deptRegex } });
+            for (const head of firstDeptHeads) {
+              await createNotification({
+                recipient: head._id,
+                type: 'ACTION_REQUIRED',
+                title: 'Sample Hand-Over Required',
+                message: `${firstDeptLabel} testing for job ${job.jobCode} is complete. Please hand over the sample to ${secondDeptLabel} department.`,
+                relatedJobId: job._id,
+                link: '/head/dispatcher'
+              });
+            }
+          }
+        }
+      }
+
       await notifyLabHeads({
-        type: 'ACTION_REQUIRED',
-        title: 'Final Review Required',
-        message: `HEAD has approved test ${instance.testCode}. Pending your final review.`,
+        type: 'SUCCESS',
+        title: 'Report Generated',
+        message: `Department Head has approved test ${instance.testCode}. Report generated.`,
         relatedJobId: instance.jobId,
         relatedInstanceId: instance._id,
-        link: '/lab-head/review'
+        link: '/lab-head/audit'
+      });
+      
+      await notifyAdmins({
+        type: 'SUCCESS',
+        title: 'Report Generated',
+        message: `Test ${instance.testCode} has been finalized by Department Head.`,
+        relatedJobId: instance.jobId,
+        relatedInstanceId: instance._id
       });
     } else {
       // REASSIGN flow
@@ -429,133 +487,7 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
   }
 });
 
-// LAB_HEAD reviews an instance: APPROVE (→ COMPLETED) or REASSIGN (→ PENDING)
-router.put('/instances/:id/lab-review', protect, authorize('LAB_HEAD'), async (req, res) => {
-  try {
-    const { action, note } = req.body;
-    if (!['APPROVE', 'REASSIGN'].includes(action)) {
-      return res.status(400).json({ message: 'Invalid action. Must be APPROVE or REASSIGN.' });
-    }
 
-    const instance = await TestInstance.findById(req.params.id);
-    if (!instance) return res.status(404).json({ message: 'Instance not found' });
-    if (instance.status !== 'PENDING_LAB_HEAD_REVIEW') {
-      return res.status(400).json({ message: 'Instance is not awaiting LAB_HEAD review' });
-    }
-
-    // Log this review action
-    instance.reviewHistory.push({
-      action,
-      by: req.user._id,
-      role: 'LAB_HEAD',
-      note: note || ''
-    });
-
-    if (action === 'APPROVE') {
-      instance.status = 'COMPLETED';
-      instance.completedAt = new Date();
-    } else {
-      // REASSIGN: snapshot results, wipe values, back to PENDING
-      instance.previousResults = instance.results.map(r => ({ ...r.toObject() }));
-      instance.results = instance.results.map(r => ({
-        ...r.toObject(),
-        value: ''
-      }));
-      instance.status = 'PENDING';
-    }
-
-    // Save instance FIRST so that the database reflects the new status
-    // before we query all instances to compute job-level completion
-    await instance.save();
-
-    if (action === 'APPROVE') {
-      // Now update job distribution status to COMPLETED
-      const job = await Job.findById(instance.jobId);
-      if (job) {
-        // Find all instances for this job (this now sees the saved COMPLETED status)
-        const allInstances = await TestInstance.find({ jobId: instance.jobId }).populate('createdBy', 'department');
-        
-        // Helper to check if all instances created by a specific department are completed
-        const isDeptCompleted = (deptName) => {
-          const deptInstances = allInstances.filter(i => i.createdBy?.department?.toLowerCase() === deptName.toLowerCase());
-          if (deptInstances.length === 0) return false;
-          return deptInstances.every(i => i.status === 'COMPLETED');
-        };
-
-        if (job.distribution.micro.required && isDeptCompleted('micro')) {
-          job.distribution.micro.status = 'COMPLETED';
-        }
-        if (job.distribution.chemical.required && (isDeptCompleted('chemical'))) {
-          job.distribution.chemical.status = 'COMPLETED';
-        }
-        await job.save({ validateBeforeSave: false });
-
-        // ── Sequential flow: notify first dept HEAD to hand over sample ──
-        if (job.sampleFlow?.type === 'SEQUENTIAL') {
-          const firstDept = job.sampleFlow.firstDepartment; // 'micro' or 'chemical'
-          const secondDept = firstDept === 'micro' ? 'chemical' : 'micro';
-
-          // Check if the first department just completed
-          if (job.distribution[firstDept]?.status === 'COMPLETED' && 
-              job.distribution[secondDept]?.status === 'AWAITING_TRANSFER') {
-            
-            const firstDeptLabel = firstDept === 'chemical' ? 'Chemical' : 'Micro';
-            const secondDeptLabel = secondDept === 'chemical' ? 'Chemical' : 'Micro';
-            const deptRegex = firstDept === 'micro' ? /^micro$/i : /^(chemical|chemical)$/i;
-            
-            const firstDeptHeads = await User.find({ role: 'HEAD', department: { $regex: deptRegex } });
-            for (const head of firstDeptHeads) {
-              await createNotification({
-                recipient: head._id,
-                type: 'ACTION_REQUIRED',
-                title: 'Sample Hand-Over Required',
-                message: `${firstDeptLabel} testing for job ${job.jobCode} is complete. Please hand over the sample to ${secondDeptLabel} department.`,
-                relatedJobId: job._id,
-                link: '/head/dispatcher'
-              });
-            }
-          }
-        }
-      }
-    }
-
-    if (action === 'APPROVE') {
-      await notifyLabHeads({
-        type: 'SUCCESS',
-        title: 'Job Completed',
-        message: `Test ${instance.testCode} has been approved and completed. Report generated.`,
-        relatedJobId: instance.jobId,
-        relatedInstanceId: instance._id,
-        link: '/lab-head/audit'
-      });
-      await notifyAdmins({
-        type: 'SUCCESS',
-        title: 'Job Completed',
-        message: `Test ${instance.testCode} has been finalized.`,
-        relatedJobId: instance.jobId,
-        relatedInstanceId: instance._id
-      });
-    } else {
-      await createNotification({
-        recipient: instance.assignedTo,
-        type: 'WARNING',
-        title: 'Job Reassigned',
-        message: `Your results for test ${instance.testCode} were rejected by LAB_HEAD. Please revise.`,
-        relatedJobId: instance.jobId,
-        relatedInstanceId: instance._id,
-        link: '/assistant'
-      });
-    }
-
-    if (req.app.get('io')) {
-      req.app.get('io').emit('TEST_REVIEWED');
-    }
-
-    res.json(instance);
-  } catch (err) {
-    res.status(500).json({ message: 'Error processing lab review', error: err.message });
-  }
-});
 
 // LAB_HEAD reopens a completed instance
 router.post('/instances/:id/reopen', protect, authorize('LAB_HEAD'), async (req, res) => {
