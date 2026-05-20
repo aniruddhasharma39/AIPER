@@ -1,0 +1,384 @@
+{
+    "autocompleteDataset": [
+        {
+            "label": "Total Bacterial Count (TBC)",
+            "category": "Microbiology",
+            "units": "CFU/g or CFU/mL"
+        },
+        {
+            "label": "Total Fungal Count (TFC)",
+            "category": "Microbiology",
+            "units": "CFU/g or CFU/mL"
+        },
+        {
+            "label": "E. coli",
+            "category": "Microbiology",
+            "units": "CFU/g, MPN/100mL, or Present/Absent"
+        },
+        {
+            "label": "Coliform",
+            "category": "Microbiology",
+            "units": "CFU/g or MPN/100mL"
+        },
+        {
+            "label": "Salmonella",
+            "category": "Microbiology",
+            "units": "Present/Absent per 25g"
+        },
+        {
+            "label": "Staphylococcus aureus",
+            "category": "Microbiology",
+            "units": "CFU/g or CFU/mL"
+        },
+        {
+            "label": "Pseudomonas",
+            "category": "Microbiology",
+            "units": "CFU/g or CFU/mL"
+        },
+        {
+            "label": "Total Plate Count (TPC)",
+            "category": "Microbiology",
+            "units": "CFU/g or CFU/mL"
+        },
+        {
+            "label": "Yeast & Mould Count",
+            "category": "Microbiology",
+            "units": "CFU/g or CFU/mL"
+        },
+        {
+            "label": "Vibrio Cholerae",
+            "category": "Microbiology",
+            "units": "Present/Absent per 25g"
+        },
+        {
+            "label": "Vibrio Parahaemolyticus",
+            "category": "Microbiology",
+            "units": "Present/Absent per 25g"
+        },
+        {
+            "label": "Shigella",
+            "category": "Microbiology",
+            "units": "Present/Absent per 25g"
+        },
+        {
+            "label": "Enterobacteriaceae",
+            "category": "Microbiology",
+            "units": "CFU/g or CFU/mL"
+        },
+        {
+            "label": "Faecal Streptococci",
+            "category": "Microbiology",
+            "units": "CFU/g or MPN/100mL"
+        },
+        {
+            "label": "Lead (Pb)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Cadmium (Cd)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Arsenic (As)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Mercury (Hg)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Copper (Cu)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Zinc (Zn)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Iron (Fe)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Nickel (Ni)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Chromium (Cr)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Manganese (Mn)",
+            "category": "Chemical",
+            "units": "mg/kg (ppm) or mg/L"
+        },
+        {
+            "label": "Calcium",
+            "category": "Chemical",
+            "units": "mg/kg or mg/L"
+        },
+        {
+            "label": "Magnesium",
+            "category": "Chemical",
+            "units": "mg/kg or mg/L"
+        },
+        {
+            "label": "Sodium",
+            "category": "Chemical",
+            "units": "mg/kg or % by mass"
+        },
+        {
+            "label": "Potassium",
+            "category": "Chemical",
+            "units": "mg/kg or % by mass"
+        },
+        {
+            "label": "pH",
+            "category": "Chemical",
+            "units": "pH units (Unitless)"
+        },
+        {
+            "label": "Total Dissolved Solids (TDS)",
+            "category": "Chemical",
+            "units": "mg/L"
+        },
+        {
+            "label": "Total Suspended Solids (TSS)",
+            "category": "Chemical",
+            "units": "mg/L"
+        },
+        {
+            "label": "Total Hardness",
+            "category": "Chemical",
+            "units": "mg/L as CaCO3"
+        },
+        {
+            "label": "Total Alkalinity",
+            "category": "Chemical",
+            "units": "mg/L as CaCO3"
+        },
+        {
+            "label": "Chloride",
+            "category": "Chemical",
+            "units": "mg/L"
+        },
+        {
+            "label": "Biochemical Oxygen Demand (BOD)",
+            "category": "Chemical",
+            "units": "mg/L"
+        },
+        {
+            "label": "Chemical Oxygen Demand (COD)",
+            "category": "Chemical",
+            "units": "mg/L"
+        },
+        {
+            "label": "Turbidity",
+            "category": "Chemical",
+            "units": "NTU (Nephelometric Turbidity Units)"
+        },
+        {
+            "label": "Conductivity",
+            "category": "Chemical",
+            "units": "µS/cm (MicroSiemens/cm)"
+        },
+        {
+            "label": "Residual Chlorine",
+            "category": "Chemical",
+            "units": "mg/L"
+        },
+        {
+            "label": "Oil & Grease",
+            "category": "Chemical",
+            "units": "mg/L"
+        },
+        {
+            "label": "Moisture",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Total Ash",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Acid Insoluble Ash",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Protein",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Fat Content",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Carbohydrates",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Energy Value",
+            "category": "Chemical",
+            "units": "kcal/100g or kJ/100g"
+        },
+        {
+            "label": "Dietary Fibre",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Crude Fibre",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Added Sugar",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Total Sugar",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Gluten",
+            "category": "Chemical",
+            "units": "mg/kg (ppm)"
+        },
+        {
+            "label": "Saponification Value",
+            "category": "Chemical",
+            "units": "mg KOH/g"
+        },
+        {
+            "label": "Iodine Value",
+            "category": "Chemical",
+            "units": "g I2/100g (Wijs)"
+        },
+        {
+            "label": "Acid Value",
+            "category": "Chemical",
+            "units": "mg KOH/g"
+        },
+        {
+            "label": "Peroxide Value",
+            "category": "Chemical",
+            "units": "meq O2/kg"
+        },
+        {
+            "label": "Refractive Index",
+            "category": "Chemical",
+            "units": "Unitless (nd at specified °C)"
+        },
+        {
+            "label": "Free Fatty Acid (FFA)",
+            "category": "Chemical",
+            "units": "% (usually as Oleic Acid)"
+        },
+        {
+            "label": "Trans Fat",
+            "category": "Chemical",
+            "units": "% by mass (or g/100g)"
+        },
+        {
+            "label": "Saturated Fatty Acid (SFA)",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Monounsaturated Fatty Acid (MUFA)",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Polyunsaturated Fatty Acid (PUFA)",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Unsaponifiable Matter",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Aflatoxin (B1, B2, G1, G2)",
+            "category": "Chemical",
+            "units": "µg/kg (ppb)"
+        },
+        {
+            "label": "Ochratoxin A",
+            "category": "Chemical",
+            "units": "µg/kg (ppb)"
+        },
+        {
+            "label": "Melamine",
+            "category": "Chemical",
+            "units": "mg/kg (ppm)"
+        },
+        {
+            "label": "Pesticide Residues",
+            "category": "Chemical",
+            "units": "mg/kg (ppm)"
+        },
+        {
+            "label": "Malathion",
+            "category": "Chemical",
+            "units": "mg/kg (ppm)"
+        },
+        {
+            "label": "Chlorpyrifos",
+            "category": "Chemical",
+            "units": "mg/kg (ppm)"
+        },
+        {
+            "label": "Curcumin Content",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Capsaicin",
+            "category": "Chemical",
+            "units": "% by mass or SHU (Scoville)"
+        },
+        {
+            "label": "Piperine",
+            "category": "Chemical",
+            "units": "% by mass"
+        },
+        {
+            "label": "Aloin",
+            "category": "Chemical",
+            "units": "% by mass or mg/kg"
+        },
+        {
+            "label": "Caffeine",
+            "category": "Chemical",
+            "units": "% by mass or mg/L"
+        },
+        {
+            "label": "Volatile Oil Content",
+            "category": "Chemical",
+            "units": "% (v/w) or mL/100g"
+        },
+        {
+            "label": "Menthol Content",
+            "category": "Chemical",
+            "units": "% by mass"
+        }
+    ]
+}
